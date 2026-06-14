@@ -1,9 +1,11 @@
 import json
-from collections.abc import Iterator, Sequence
+from collections import defaultdict
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone, tzinfo
+from itertools import accumulate
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar
 
 
 def decode(s: str) -> str:
@@ -135,11 +137,12 @@ def parse_message(raw: dict, me: str) -> Message:
     )
 
 
+def read_json(path: Path) -> dict:
+    return json.loads(path.read_text())
+
+
 def self_name(export: Path) -> str:
-    data = json.loads(
-        (export / "personal_information" / "personal_information.json")
-        .read_text()
-    )
+    data = read_json(export / "personal_information" / "personal_information.json")
     return decode(data["profile_user"][0]["string_map_data"]["Name"]["value"])
 
 
@@ -152,7 +155,7 @@ def read_threads(export: Path) -> Iterator[tuple[set[str], list[dict]]]:
             participants: set[str] = set()
             messages: list[dict] = []
             for file in sorted(directory.glob("message_*.json")):
-                data = json.loads(file.read_text())
+                data = read_json(file)
                 participants.update(
                     decode(p["name"]) for p in data["participants"]
                 )
@@ -175,3 +178,72 @@ def load(export: Path) -> list[Chat]:
         )
         chats.append(Chat(person, messages))
     return chats
+
+
+Measure = Callable[[Message], int]
+
+
+def text_of(m: Message) -> str:
+    return m.body.text if isinstance(m.body, Text) else ""
+
+
+def count(_: Message) -> int:
+    return 1
+
+
+def characters(m: Message) -> int:
+    return len(text_of(m))
+
+
+def words(m: Message) -> int:
+    return len(text_of(m).split())
+
+
+def media(m: Message) -> int:
+    if isinstance(m.body, Media):
+        return len(m.body.items)
+    return 1 if isinstance(m.body, Audio) else 0
+
+
+def reactions(m: Message) -> int:
+    return len(m.reactions)
+
+
+MEASURES: dict[str, Measure] = {
+    "messages": count,
+    "characters": characters,
+    "words": words,
+    "media": media,
+    "reactions": reactions,
+}
+
+
+K = TypeVar("K")
+
+
+def tally(
+    messages: Iterable[Message],
+    key: Callable[[Message], K],
+    measure: Measure,
+) -> dict[K, int]:
+    totals: dict[K, int] = defaultdict(int)
+    for m in messages:
+        totals[key(m)] += measure(m)
+    return dict(totals)
+
+
+def hour(tz: tzinfo) -> Callable[[Message], int]:
+    return lambda m: m.timestamp.astimezone(tz).hour
+
+
+def day(tz: tzinfo) -> Callable[[Message], date]:
+    return lambda m: m.timestamp.astimezone(tz).date()
+
+
+def author(m: Message) -> Author:
+    return m.author
+
+
+def cumulative(daily: dict[date, int]) -> dict[date, int]:
+    days = sorted(daily)
+    return dict(zip(days, accumulate(daily[d] for d in days)))
