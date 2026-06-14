@@ -1,6 +1,6 @@
 import json
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone, tzinfo
 from itertools import accumulate
@@ -247,3 +247,65 @@ def author(m: Message) -> Author:
 def cumulative(daily: dict[date, int]) -> dict[date, int]:
     days = sorted(daily)
     return dict(zip(days, accumulate(daily[d] for d in days)))
+
+
+def label_for(chat: Chat, chats: Collection[Chat]) -> str:
+    if sum(c.person == chat.person for c in chats) > 1:
+        return f"{chat.person} ({len(chat.messages)})"
+    return chat.person
+
+
+def main() -> None:
+    import pandas as pd
+    import streamlit as st
+
+    st.set_page_config(page_title="Instagram messages", layout="wide")
+    st.title("Instagram messages")
+    tz = datetime.now().astimezone().tzinfo or timezone.utc
+
+    @st.cache_data
+    def get_chats(export: str) -> list[Chat]:
+        return load(Path(export))
+
+    export = st.sidebar.text_input("Export folder", "context/20230910")
+    if not (Path(export) / "messages").is_dir():
+        st.info("Enter the path to an unzipped Instagram data export.")
+        st.stop()
+
+    name = st.sidebar.selectbox("Measure", list(MEASURES))
+    measure = MEASURES[name]
+    unit = name.title()
+
+    chats = sorted(get_chats(export), key=lambda c: len(c.messages), reverse=True)
+    chosen = {label_for(c, chats): c for c in chats}
+    who = st.sidebar.selectbox("Person", ["Everyone", *chosen])
+
+    def hourly(messages: Iterable[Message]) -> None:
+        counts = tally(messages, hour(tz), measure)
+        st.subheader(f"{unit} by hour of day")
+        st.bar_chart(pd.Series(counts).reindex(range(24), fill_value=0))
+
+    if who == "Everyone":
+        totals = {label: sum(map(measure, c.messages)) for label, c in chosen.items()}
+        st.subheader(f"{unit} per person")
+        st.bar_chart(pd.Series(totals).sort_values(ascending=False))
+        hourly(m for c in chats for m in c.messages)
+        return
+
+    chat = chosen[who]
+    split = tally(chat.messages, author, measure)
+    you, them = st.columns(2)
+    you.metric("You", split.get("self", 0))
+    them.metric(chat.person, split.get("other", 0))
+
+    hourly(chat.messages)
+
+    st.subheader(f"{unit} over time")
+    view = st.radio("View", ["Daily", "Cumulative"], horizontal=True, label_visibility="collapsed")
+    daily = tally(chat.messages, day(tz), measure)
+    series = cumulative(daily) if view == "Cumulative" else daily
+    st.line_chart(pd.Series(series).sort_index())
+
+
+if __name__ == "__main__":
+    main()
