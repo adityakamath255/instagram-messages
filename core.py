@@ -1,4 +1,7 @@
+import calendar
+import io
 import json
+import zipfile
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -99,23 +102,24 @@ def media_items(raw: dict) -> list[MediaItem]:
 def parse_body(raw: dict) -> Body:
     if raw.get("is_unsent"):
         return Unsent()
-    if "call_duration" in raw:
-        return Call(raw["call_duration"])
-    if "audio_files" in raw:
-        return Audio(raw["audio_files"][0]["uri"])
-
-    items = media_items(raw)
-    if items:
+    elif (call_duration := raw.get("call_duration")) is not None:
+        return Call(call_duration)
+    elif audio_files := raw.get("audio_files"):
+        return Audio(audio_files[0]["uri"])
+    elif items := media_items(raw):
         return Media(items)
-
-    content = decode(raw.get("content", ""))
-    typed = "" if content.endswith(PLACEHOLDER) else content
-
-    if typed:
-        return Text(typed)
-    if share := raw.get("share"):
-        return Shared(share.get("link"), decode(share.get("share_text", "")))
-    return Unknown()
+    elif (
+        (content := decode(raw.get("content", "")))
+        and not content.endswith(PLACEHOLDER)
+    ):
+        return Text(content)
+    elif share := raw.get("share"):
+        return Shared(
+            share.get("link"), 
+            decode(share.get("share_text", ""))
+        )
+    else:
+        return Unknown()
 
 
 def author_of(name: str, me: str) -> Author:
@@ -141,16 +145,43 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text())
 
 
+MESSAGES_DIR = Path("your_instagram_activity") / "messages"
+PERSONAL_INFO = (
+    Path("personal_information")
+    / "personal_information"
+    / "personal_information.json"
+)
+FOLLOWS_DIR = Path("connections") / "followers_and_following"
+
+EXPORT_MARKERS = ("your_instagram_activity", "connections", "personal_information")
+
+
+def find_root(base: Path) -> Path | None:
+    directories = (p for p in base.rglob("*") if p.is_dir())
+    candidates = [
+        d
+        for d in (base, *directories)
+        if any((d / marker).is_dir() for marker in EXPORT_MARKERS)
+    ]
+    return min(candidates, key=lambda d: len(d.parts), default=None)
+
+
+def extract_export(payloads: Iterable[bytes], dest: Path) -> Path | None:
+    for data in payloads:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            archive.extractall(dest)
+    return find_root(dest)
+
+
 def self_name(export: Path) -> str:
-    data = read_json(
-        export / "personal_information" / "personal_information.json"
-    )
-    return decode(data["profile_user"][0]["string_map_data"]["Name"]["value"])
+    info = read_json(export / PERSONAL_INFO)["profile_user"][0]["string_map_data"]
+    field = info.get("Name") or info["Username"]
+    return decode(field["value"])
 
 
 def read_threads(export: Path) -> Iterator[tuple[set[str], list[dict]]]:
     for folder in ("inbox", "message_requests"):
-        base = export / "messages" / folder
+        base = export / MESSAGES_DIR / folder
         if not base.is_dir():
             continue
         for directory in sorted(base.iterdir()):
@@ -186,7 +217,11 @@ Measure = Callable[[Message], int]
 
 
 def text_of(m: Message) -> str:
-    return m.body.text if isinstance(m.body, Text) else ""
+    match m.body:
+        case Text(text):
+            return text
+        case _:
+            return ""
 
 
 def count(_: Message) -> int:
@@ -202,12 +237,16 @@ def words(m: Message) -> int:
 
 
 def media(m: Message) -> int:
-    if isinstance(m.body, Media):
-        return len(m.body.items)
-    return 1 if isinstance(m.body, Audio) else 0
+    match m.body:
+        case Media(items):
+            return len(items)
+        case Audio():
+            return 1
+        case _:
+            return 0
 
 
-MEASURES: dict[str, Measure] = {
+MEASURES: Mapping[str, Measure] = {
     "messages": count,
     "characters": characters,
     "words": words,
@@ -229,6 +268,16 @@ def tally(
     return dict(totals)
 
 
+def distribution(
+    messages: Iterable[Message],
+    key: Callable[[Message], K],
+    measure: Measure,
+    domain: Iterable[K],
+) -> dict[K, int]:
+    counts = tally(messages, key, measure)
+    return {value: counts.get(value, 0) for value in domain}
+
+
 def when(tz: tzinfo, of: Callable[[datetime], K]) -> Callable[[Message], K]:
     return lambda m: of(m.timestamp.astimezone(tz))
 
@@ -241,8 +290,8 @@ def day(tz: tzinfo) -> Callable[[Message], date]:
     return when(tz, lambda t: t.date())
 
 
-def weekday(tz: tzinfo) -> Callable[[Message], int]:
-    return when(tz, lambda t: t.weekday())
+def weekday_name(tz: tzinfo) -> Callable[[Message], str]:
+    return when(tz, lambda t: calendar.day_abbr[t.weekday()])
 
 
 def author(m: Message) -> Author:
@@ -261,9 +310,39 @@ def reaction_emojis(messages: Iterable[Message]) -> dict[str, int]:
     return dict(Counter(r.emoji for r in all_reactions(messages)))
 
 
-def cumulative(daily: Mapping[date, int]) -> dict[date, int]:
-    days = sorted(daily)
-    return dict(zip(days, accumulate(daily[d] for d in days)))
+def cumulative(series: Mapping[date, int]) -> dict[date, int]:
+    days = sorted(series)
+    return dict(zip(days, accumulate(series[d] for d in days)))
+
+
+def total(messages: Iterable[Message], measure: Measure) -> int:
+    return sum(measure(m) for m in messages)
+
+
+def by_author(messages: Iterable[Message], measure: Measure) -> dict[Author, int]:
+    return tally(messages, author, measure)
+
+
+def by_hour(
+    messages: Iterable[Message], measure: Measure, tz: tzinfo
+) -> dict[int, int]:
+    return distribution(messages, hour(tz), measure, range(24))
+
+
+def by_weekday(
+    messages: Iterable[Message], measure: Measure, tz: tzinfo
+) -> dict[str, int]:
+    return distribution(messages, weekday_name(tz), measure, calendar.day_abbr)
+
+
+def daily(
+    messages: Iterable[Message], measure: Measure, tz: tzinfo
+) -> dict[date, int]:
+    return dict(sorted(tally(messages, day(tz), measure).items()))
+
+
+def composition(messages: Iterable[Message]) -> dict[str, int]:
+    return tally(messages, kind, count)
 
 
 @dataclass(frozen=True)
@@ -272,28 +351,41 @@ class Follow:
     at: datetime
 
 
+def follow_name(entry: dict, item: dict) -> str:
+    return (
+        item.get("value")
+        or entry.get("title")
+        or item["href"].rstrip("/").rsplit("/", 1)[-1]
+    )
+
+
 def parse_follows(entries: Iterable[dict]) -> list[Follow]:
     return [
         Follow(
-            item["value"], 
-            datetime.fromtimestamp(item["timestamp"], tz=timezone.utc)
+            follow_name(entry, item),
+            datetime.fromtimestamp(item["timestamp"], tz=timezone.utc),
         )
         for entry in entries
         for item in entry["string_list_data"]
     ]
 
 
+def read_entries(path: Path) -> list[dict]:
+    data = json.loads(path.read_text())
+    return data if isinstance(data, list) else [data]
+
+
 def followers(export: Path) -> list[Follow]:
-    base = export / "followers_and_following"
+    base = export / FOLLOWS_DIR
     return parse_follows(
         entry
         for file in sorted(base.glob("followers_*.json"))
-        for entry in json.loads(file.read_text())
+        for entry in read_entries(file)
     )
 
 
 def following(export: Path) -> list[Follow]:
-    data = read_json(export / "followers_and_following" / "following.json")
+    data = read_json(export / FOLLOWS_DIR / "following.json")
     return parse_follows(data["relationships_following"])
 
 
