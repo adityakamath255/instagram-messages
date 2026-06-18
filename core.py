@@ -91,7 +91,7 @@ MEDIA_KEYS: tuple[tuple[MediaKind, str], ...] = (
 )
 
 
-def media_items(raw: dict) -> list[MediaItem]:
+def media_items(raw: Mapping) -> list[MediaItem]:
     return [
         MediaItem(kind, item["uri"])
         for kind, key in MEDIA_KEYS
@@ -99,7 +99,7 @@ def media_items(raw: dict) -> list[MediaItem]:
     ]
 
 
-def parse_body(raw: dict) -> Body:
+def parse_body(raw: Mapping) -> Body:
     if raw.get("is_unsent"):
         return Unsent()
     elif (call_duration := raw.get("call_duration")) is not None:
@@ -153,7 +153,9 @@ PERSONAL_INFO = (
 )
 FOLLOWS_DIR = Path("connections") / "followers_and_following"
 
-EXPORT_MARKERS = ("your_instagram_activity", "connections", "personal_information")
+EXPORT_MARKERS = (
+    "your_instagram_activity", "connections", "personal_information"
+)
 
 
 def find_root(base: Path) -> Path | None:
@@ -174,7 +176,8 @@ def extract_export(payloads: Iterable[bytes], dest: Path) -> Path | None:
 
 
 def self_name(export: Path) -> str:
-    info = read_json(export / PERSONAL_INFO)["profile_user"][0]["string_map_data"]
+    profile = read_json(export / PERSONAL_INFO)["profile_user"][0]
+    info = profile["string_map_data"]
     field = info.get("Name") or info["Username"]
     return decode(field["value"])
 
@@ -306,8 +309,10 @@ def all_reactions(messages: Iterable[Message]) -> Iterator[Reaction]:
     return (r for m in messages for r in m.reactions)
 
 
-def reaction_emojis(messages: Iterable[Message]) -> dict[str, int]:
-    return dict(Counter(r.emoji for r in all_reactions(messages)))
+def reactions_by_actor(
+    messages: Iterable[Message],
+) -> dict[tuple[str, Author], int]:
+    return dict(Counter((r.emoji, r.actor) for r in all_reactions(messages)))
 
 
 def cumulative(series: Mapping[date, int]) -> dict[date, int]:
@@ -319,7 +324,9 @@ def total(messages: Iterable[Message], measure: Measure) -> int:
     return sum(measure(m) for m in messages)
 
 
-def by_author(messages: Iterable[Message], measure: Measure) -> dict[Author, int]:
+def by_author(
+    messages: Iterable[Message], measure: Measure
+) -> dict[Author, int]:
     return tally(messages, author, measure)
 
 
@@ -387,10 +394,6 @@ def followers(export: Path) -> list[Follow]:
 def following(export: Path) -> list[Follow]:
     data = read_json(export / FOLLOWS_DIR / "following.json")
     return parse_follows(data["relationships_following"])
-
-
-def follows_by_day(follows: Iterable[Follow], tz: tzinfo) -> dict[date, int]:
-    return dict(Counter(f.at.astimezone(tz).date() for f in follows))
 
 
 def profile_url(follow: Follow) -> str:

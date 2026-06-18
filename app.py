@@ -1,16 +1,20 @@
 import tempfile
+from collections import Counter
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone, tzinfo
+from datetime import date, datetime, timezone, tzinfo
 from pathlib import Path
 from typing import TypeVar
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
+from plotly.graph_objects import Figure
 
 from core import (
     Chat,
     Follow,
     MEASURES,
+    Message,
     by_author,
     by_hour,
     by_weekday,
@@ -20,14 +24,29 @@ from core import (
     extract_export,
     followers,
     following,
-    follows_by_day,
     labels,
     load,
     profile_url,
-    reaction_emojis,
+    reactions_by_actor,
     reciprocity,
     total,
 )
+
+TOP_N = 25
+ACTOR_LABEL = {"self": "You", "other": "Them"}
+
+BLUE = "#5588ff"
+LIGHT_BLUE = "#aaaaff"
+
+px.defaults.template = "plotly_white"
+
+K = TypeVar("K")
+
+
+def show(fig: Figure) -> None:
+    fig.update_layout(margin=dict(t=10, b=10, l=10, r=10))
+    fig.update_yaxes(rangemode="tozero")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 @st.cache_data
@@ -47,80 +66,163 @@ def load_follows(export: str) -> tuple[list[Follow], list[Follow]]:
     return followers(base), following(base)
 
 
-def ranked_bar(title: str, data: Mapping[str, int]) -> None:
-    if data:
-        st.subheader(title)
-        st.bar_chart(pd.Series(data).sort_values(ascending=False))
-
-
-K = TypeVar("K")
-
-
-def ordered_bar(title: str, data: Mapping[K, int]) -> None:
+def bars(
+    title: str,
+    data: Mapping[K, int],
+    *,
+    value_title: str,
+    category_title: str,
+    sort: bool = False,
+    cap: int | None = None,
+    label_angle: int = 0,
+) -> None:
+    items = list(data.items())
+    if sort:
+        items.sort(key=lambda kv: kv[1], reverse=True)
+    if cap is not None:
+        items = items[:cap]
+    if not items:
+        return
     st.subheader(title)
-    st.bar_chart(pd.Series(data))
+    order = [str(k) for k, _ in items]
+    frame = pd.DataFrame({"category": order, "value": [v for _, v in items]})
+    fig = px.bar(
+        frame,
+        x="category",
+        y="value",
+        labels={"category": category_title, "value": value_title},
+    )
+    fig.update_xaxes(
+        categoryorder="array", categoryarray=order, tickangle=label_angle
+    )
+    fig.update_traces(marker_color=BLUE)
+    show(fig)
+
+
+def timeline(series: Mapping[date, int], *, value_title: str) -> None:
+    frame = pd.DataFrame(
+        {"date": list(series), "value": list(series.values())}
+    )
+    fig = px.line(
+        frame,
+        x="date",
+        y="value",
+        labels={"date": "Date", "value": value_title},
+    )
+    fig.update_traces(line_color=BLUE)
+    fig.update_xaxes(title_text="")
+    show(fig)
+
+
+def reactions_chart(messages: Iterable[Message]) -> None:
+    data = reactions_by_actor(messages)
+    if not data:
+        return
+    st.subheader("Top reactions")
+    totals: Counter[str] = Counter()
+    for (emoji, _), n in data.items():
+        totals[emoji] += n
+    top = [emoji for emoji, _ in totals.most_common(TOP_N)]
+    frame = pd.DataFrame(
+        {"emoji": emoji, "who": ACTOR_LABEL[actor], "value": n}
+        for (emoji, actor), n in data.items()
+        if emoji in top
+    )
+    fig = px.bar(
+        frame,
+        x="emoji",
+        y="value",
+        color="who",
+        barmode="group",
+        labels={"emoji": "Reaction", "value": "Reactions", "who": "By"},
+        color_discrete_map={"You": BLUE, "Them": LIGHT_BLUE},
+    )
+    fig.update_xaxes(categoryorder="array", categoryarray=top, tickangle=0)
+    fig.update_xaxes(title_text="")
+    fig.update_layout(legend_title_text="")
+    show(fig)
 
 
 def render_messages(chats: list[Chat], tz: tzinfo) -> None:
+    ordered = sorted(chats, key=lambda c: len(c.messages), reverse=True)
+    chosen = dict(zip(labels(ordered), ordered))
+
+    who = st.sidebar.selectbox("Person", ["Everyone", *chosen])
     name = st.sidebar.selectbox("Measure", list(MEASURES))
+    trend = (
+        st.sidebar.radio("Over time", ["Daily", "Cumulative"])
+        if who != "Everyone"
+        else None
+    )
     measure = MEASURES[name]
     unit = name.title()
 
-    ordered = sorted(chats, key=lambda c: len(c.messages), reverse=True)
-    chosen = dict(zip(labels(ordered), ordered))
-    who = st.sidebar.selectbox("Person", ["Everyone", *chosen])
+    messages = (
+        [m for c in chosen.values() for m in c.messages]
+        if who == "Everyone"
+        else chosen[who].messages
+    )
 
     if who == "Everyone":
-        messages = [m for c in chosen.values() for m in c.messages]
-        ranked_bar(
+        bars(
             f"{unit} per person",
             {label: total(c.messages, measure) for label, c in chosen.items()},
+            value_title=unit,
+            category_title="Person",
+            sort=True,
+            cap=TOP_N,
+            label_angle=-45,
         )
     else:
-        chat = chosen[who]
-        messages = list(chat.messages)
         split = by_author(messages, measure)
         you, them = st.columns(2)
         you.metric("You", split.get("self", 0))
-        them.metric(chat.person, split.get("other", 0))
+        them.metric(chosen[who].person, split.get("other", 0))
 
-    ordered_bar(f"{unit} by hour of day", by_hour(messages, measure, tz))
-    ordered_bar(f"{unit} by day of week", by_weekday(messages, measure, tz))
+    bars(
+        f"{unit} by hour of day",
+        by_hour(messages, measure, tz),
+        value_title=unit,
+        category_title="Hour",
+    )
+    bars(
+        f"{unit} by day of week",
+        by_weekday(messages, measure, tz),
+        value_title=unit,
+        category_title="Day",
+    )
 
-    if who != "Everyone":
+    if trend is not None:
         st.subheader(f"{unit} over time")
-        view = st.radio(
-            "View",
-            ["Daily", "Cumulative"],
-            horizontal=True,
-            label_visibility="collapsed",
-        )
         series = daily(messages, measure, tz)
-        if view == "Cumulative":
+        if trend == "Cumulative":
             series = cumulative(series)
-        st.line_chart(pd.Series(series))
+        timeline(series, value_title=unit)
 
-    ranked_bar("Message composition", composition(messages))
-    ranked_bar("Top reactions", reaction_emojis(messages))
+    bars(
+        "Message composition",
+        composition(messages),
+        value_title="Messages",
+        category_title="Type",
+        sort=True,
+    )
+    reactions_chart(messages)
 
 
 def follow_table(group: Iterable[Follow]) -> pd.DataFrame:
     return pd.DataFrame(
-        {"username": f.username, "profile": profile_url(f), "since": f.at.date()}
+        {
+            "username": f.username,
+            "profile": profile_url(f),
+            "since": f.at.date(),
+        }
         for f in group
     )
 
 
 def render_follows(
-    follower_list: list[Follow], following_list: list[Follow], tz: tzinfo
+    follower_list: list[Follow], following_list: list[Follow]
 ) -> None:
-    growth = pd.DataFrame({
-        "followers": pd.Series(follows_by_day(follower_list, tz)),
-        "following": pd.Series(follows_by_day(following_list, tz)),
-    }).fillna(0).sort_index().cumsum()
-    st.subheader("Follow growth")
-    st.line_chart(growth)
-
     rec = reciprocity(follower_list, following_list)
     groups = {
         "Mutual": rec.mutual,
@@ -158,10 +260,14 @@ def main() -> None:
         )
         st.stop()
 
-    if st.sidebar.radio("View", ["Messages", "Follows"]) == "Messages":
+    st.sidebar.divider()
+    view = st.sidebar.radio("View", ["Messages", "Follows"])
+    st.sidebar.divider()
+
+    if view == "Messages":
         render_messages(load_chats(export), tz)
     else:
-        render_follows(*load_follows(export), tz)
+        render_follows(*load_follows(export))
 
 
 if __name__ == "__main__":
