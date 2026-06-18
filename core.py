@@ -19,50 +19,6 @@ def decode(s: str) -> str:
 
 
 Author = Literal["self", "other"]
-MediaKind = Literal["photo", "video"]
-
-
-@dataclass(frozen=True)
-class MediaItem:
-    kind: MediaKind
-    uri: str
-
-
-@dataclass(frozen=True)
-class Media:
-    items: Sequence[MediaItem]
-
-
-@dataclass(frozen=True)
-class Audio:
-    uri: str
-
-
-@dataclass(frozen=True)
-class Shared:
-    link: str | None
-    description: str
-
-
-@dataclass(frozen=True)
-class Text:
-    text: str
-
-
-@dataclass(frozen=True)
-class Call:
-    duration_s: int
-
-
-@dataclass(frozen=True)
-class Unsent: ...
-
-
-@dataclass(frozen=True)
-class Unknown: ...
-
-
-Body = Text | Media | Audio | Shared | Call | Unsent | Unknown
 
 
 @dataclass(frozen=True)
@@ -76,7 +32,7 @@ class Message:
     author: Author
     timestamp: datetime
     reactions: Sequence[Reaction]
-    body: Body
+    text: str | None
 
 
 @dataclass(frozen=True)
@@ -86,40 +42,24 @@ class Chat:
 
 
 PLACEHOLDER = "sent an attachment."
-MEDIA_KEYS: tuple[tuple[MediaKind, str], ...] = (
-    ("photo", "photos"), ("video", "videos")
-)
+MEDIA_KEYS = ("photos", "videos")
 
 
-def media_items(raw: Mapping) -> list[MediaItem]:
-    return [
-        MediaItem(kind, item["uri"])
-        for kind, key in MEDIA_KEYS
-        for item in raw.get(key, [])
-    ]
+def has_media(raw: Mapping) -> bool:
+    return any(raw.get(key) for key in MEDIA_KEYS)
 
 
-def parse_body(raw: Mapping) -> Body:
-    if raw.get("is_unsent"):
-        return Unsent()
-    elif (call_duration := raw.get("call_duration")) is not None:
-        return Call(call_duration)
-    elif audio_files := raw.get("audio_files"):
-        return Audio(audio_files[0]["uri"])
-    elif items := media_items(raw):
-        return Media(items)
-    elif (
-        (content := decode(raw.get("content", "")))
-        and not content.endswith(PLACEHOLDER)
-    ):
-        return Text(content)
-    elif share := raw.get("share"):
-        return Shared(
-            share.get("link"), 
-            decode(share.get("share_text", ""))
-        )
-    else:
-        return Unknown()
+def message_text(raw: Mapping) -> str | None:
+    blocked = (
+        raw.get("is_unsent")
+        or raw.get("call_duration") is not None
+        or raw.get("audio_files")
+        or has_media(raw)
+    )
+    if blocked:
+        return None
+    content = decode(raw.get("content", ""))
+    return content if content and not content.endswith(PLACEHOLDER) else None
 
 
 def author_of(name: str, me: str) -> Author:
@@ -137,7 +77,7 @@ def parse_message(raw: dict, me: str) -> Message:
             Reaction(decode(r["reaction"]), author_of(r["actor"], me))
             for r in raw.get("reactions", [])
         ],
-        body=parse_body(raw),
+        text=message_text(raw),
     )
 
 
@@ -219,41 +159,17 @@ def load(export: Path) -> list[Chat]:
 Measure = Callable[[Message], int]
 
 
-def text_of(m: Message) -> str:
-    match m.body:
-        case Text(text):
-            return text
-        case _:
-            return ""
-
-
 def count(_: Message) -> int:
     return 1
 
 
 def characters(m: Message) -> int:
-    return len(text_of(m))
-
-
-def words(m: Message) -> int:
-    return len(text_of(m).split())
-
-
-def media(m: Message) -> int:
-    match m.body:
-        case Media(items):
-            return len(items)
-        case Audio():
-            return 1
-        case _:
-            return 0
+    return len(m.text or "")
 
 
 MEASURES: Mapping[str, Measure] = {
     "messages": count,
     "characters": characters,
-    "words": words,
-    "media": media,
 }
 
 
@@ -285,34 +201,12 @@ def when(tz: tzinfo, of: Callable[[datetime], K]) -> Callable[[Message], K]:
     return lambda m: of(m.timestamp.astimezone(tz))
 
 
-def hour(tz: tzinfo) -> Callable[[Message], int]:
-    return when(tz, lambda t: t.hour)
-
-
-def day(tz: tzinfo) -> Callable[[Message], date]:
-    return when(tz, lambda t: t.date())
-
-
-def weekday_name(tz: tzinfo) -> Callable[[Message], str]:
-    return when(tz, lambda t: calendar.day_abbr[t.weekday()])
-
-
-def author(m: Message) -> Author:
-    return m.author
-
-
-def kind(m: Message) -> str:
-    return type(m.body).__name__
-
-
-def all_reactions(messages: Iterable[Message]) -> Iterator[Reaction]:
-    return (r for m in messages for r in m.reactions)
-
-
 def reactions_by_actor(
     messages: Iterable[Message],
 ) -> dict[tuple[str, Author], int]:
-    return dict(Counter((r.emoji, r.actor) for r in all_reactions(messages)))
+    return dict(Counter(
+        (r.emoji, r.actor) for m in messages for r in m.reactions
+    ))
 
 
 def cumulative(series: Mapping[date, int]) -> dict[date, int]:
@@ -327,29 +221,34 @@ def total(messages: Iterable[Message], measure: Measure) -> int:
 def by_author(
     messages: Iterable[Message], measure: Measure
 ) -> dict[Author, int]:
-    return tally(messages, author, measure)
+    return tally(messages, lambda m: m.author, measure)
 
 
 def by_hour(
     messages: Iterable[Message], measure: Measure, tz: tzinfo
 ) -> dict[int, int]:
-    return distribution(messages, hour(tz), measure, range(24))
+    return distribution(
+        messages, when(tz, lambda t: t.hour), measure, range(24)
+    )
 
 
 def by_weekday(
     messages: Iterable[Message], measure: Measure, tz: tzinfo
 ) -> dict[str, int]:
-    return distribution(messages, weekday_name(tz), measure, calendar.day_abbr)
+    return distribution(
+        messages,
+        when(tz, lambda t: calendar.day_abbr[t.weekday()]),
+        measure,
+        calendar.day_abbr,
+    )
 
 
 def daily(
     messages: Iterable[Message], measure: Measure, tz: tzinfo
 ) -> dict[date, int]:
-    return dict(sorted(tally(messages, day(tz), measure).items()))
-
-
-def composition(messages: Iterable[Message]) -> dict[str, int]:
-    return tally(messages, kind, count)
+    return dict(
+        sorted(tally(messages, when(tz, lambda t: t.date()), measure).items())
+    )
 
 
 @dataclass(frozen=True)

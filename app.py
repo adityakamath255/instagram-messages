@@ -18,7 +18,6 @@ from core import (
     by_author,
     by_hour,
     by_weekday,
-    composition,
     cumulative,
     daily,
     extract_export,
@@ -199,13 +198,6 @@ def render_messages(chats: list[Chat], tz: tzinfo) -> None:
             series = cumulative(series)
         timeline(series, value_title=unit)
 
-    bars(
-        "Message composition",
-        composition(messages),
-        value_title="Messages",
-        category_title="Type",
-        sort=True,
-    )
     reactions_chart(messages)
 
 
