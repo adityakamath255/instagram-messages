@@ -1,7 +1,8 @@
 import tempfile
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, timezone, tzinfo
+from hashlib import sha256
 from pathlib import Path
 from typing import TypeVar
 
@@ -14,6 +15,7 @@ from core import (
     Chat,
     Follow,
     MEASURES,
+    Measure,
     Message,
     by_author,
     by_hour,
@@ -34,23 +36,34 @@ from core import (
 TOP_N = 25
 ACTOR_LABEL = {"self": "You", "other": "Them"}
 
-BLUE = "#5588ff"
-LIGHT_BLUE = "#aaaaff"
+# Catppuccin Mocha
+ACCENT = "#cba6f7"  # mauve
+SECONDARY = "#fab387"  # peach
+FOREGROUND = "#cdd6f4"
+GRID = "#313244"
 
-px.defaults.template = "plotly_white"
+px.defaults.template = "plotly_dark"
 
 K = TypeVar("K")
 
 
 def show(fig: Figure) -> None:
-    fig.update_layout(margin=dict(t=10, b=10, l=10, r=10))
-    fig.update_yaxes(rangemode="tozero")
+    fig.update_layout(
+        margin=dict(t=10, b=10, l=10, r=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color=FOREGROUND,
+    )
+    fig.update_xaxes(gridcolor=GRID, zerolinecolor=GRID)
+    fig.update_yaxes(rangemode="tozero", gridcolor=GRID, zerolinecolor=GRID)
     st.plotly_chart(fig, use_container_width=True)
 
 
 @st.cache_data
 def export_root(payloads: tuple[bytes, ...]) -> str:
-    root = extract_export(payloads, Path(tempfile.mkdtemp()))
+    key = sha256(b"".join(payloads)).hexdigest()
+    dest = Path(tempfile.gettempdir()) / "instagram-export" / key
+    root = extract_export(payloads, dest)
     return str(root) if root else ""
 
 
@@ -94,7 +107,7 @@ def bars(
     fig.update_xaxes(
         categoryorder="array", categoryarray=order, tickangle=label_angle
     )
-    fig.update_traces(marker_color=BLUE)
+    fig.update_traces(marker_color=ACCENT)
     show(fig)
 
 
@@ -108,7 +121,7 @@ def timeline(series: Mapping[date, int], *, value_title: str) -> None:
         y="value",
         labels={"date": "Date", "value": value_title},
     )
-    fig.update_traces(line_color=BLUE)
+    fig.update_traces(line_color=ACCENT)
     fig.update_xaxes(title_text="")
     show(fig)
 
@@ -134,7 +147,7 @@ def reactions_chart(messages: Iterable[Message]) -> None:
         color="who",
         barmode="group",
         labels={"emoji": "Reaction", "value": "Reactions", "who": "By"},
-        color_discrete_map={"You": BLUE, "Them": LIGHT_BLUE},
+        color_discrete_map={"You": ACCENT, "Them": SECONDARY},
     )
     fig.update_xaxes(categoryorder="array", categoryarray=top, tickangle=0)
     fig.update_xaxes(title_text="")
@@ -142,42 +155,9 @@ def reactions_chart(messages: Iterable[Message]) -> None:
     show(fig)
 
 
-def render_messages(chats: list[Chat], tz: tzinfo) -> None:
-    ordered = sorted(chats, key=lambda c: len(c.messages), reverse=True)
-    chosen = dict(zip(labels(ordered), ordered))
-
-    who = st.sidebar.selectbox("Person", ["Everyone", *chosen])
-    name = st.sidebar.selectbox("Measure", list(MEASURES))
-    trend = (
-        st.sidebar.radio("Over time", ["Daily", "Cumulative"])
-        if who != "Everyone"
-        else None
-    )
-    measure = MEASURES[name]
-    unit = name.title()
-
-    messages = (
-        [m for c in chosen.values() for m in c.messages]
-        if who == "Everyone"
-        else chosen[who].messages
-    )
-
-    if who == "Everyone":
-        bars(
-            f"{unit} per person",
-            {label: total(c.messages, measure) for label, c in chosen.items()},
-            value_title=unit,
-            category_title="Person",
-            sort=True,
-            cap=TOP_N,
-            label_angle=-45,
-        )
-    else:
-        split = by_author(messages, measure)
-        you, them = st.columns(2)
-        you.metric("You", split.get("self", 0))
-        them.metric(chosen[who].person, split.get("other", 0))
-
+def message_breakdown(
+    messages: Sequence[Message], measure: Measure, unit: str, tz: tzinfo
+) -> None:
     bars(
         f"{unit} by hour of day",
         by_hour(messages, measure, tz),
@@ -191,14 +171,57 @@ def render_messages(chats: list[Chat], tz: tzinfo) -> None:
         category_title="Day",
     )
 
-    if trend is not None:
-        st.subheader(f"{unit} over time")
-        series = daily(messages, measure, tz)
-        if trend == "Cumulative":
-            series = cumulative(series)
-        timeline(series, value_title=unit)
 
+def render_overview(
+    chosen: dict[str, Chat], measure: Measure, unit: str, tz: tzinfo
+) -> None:
+    messages = [m for c in chosen.values() for m in c.messages]
+    bars(
+        f"{unit} per person",
+        {label: total(c.messages, measure) for label, c in chosen.items()},
+        value_title=unit,
+        category_title="Person",
+        sort=True,
+        cap=TOP_N,
+        label_angle=-45,
+    )
+    message_breakdown(messages, measure, unit, tz)
     reactions_chart(messages)
+
+
+def render_conversation(
+    chat: Chat, measure: Measure, unit: str, tz: tzinfo
+) -> None:
+    split = by_author(chat.messages, measure)
+    you, them = st.columns(2)
+    you.metric("You", split.get("self", 0))
+    them.metric(chat.person, split.get("other", 0))
+
+    message_breakdown(chat.messages, measure, unit, tz)
+
+    trend = st.sidebar.radio("Over time", ["Daily", "Cumulative"])
+    st.subheader(f"{unit} over time")
+    series = daily(chat.messages, measure, tz)
+    if trend == "Cumulative":
+        series = cumulative(series)
+    timeline(series, value_title=unit)
+
+    reactions_chart(chat.messages)
+
+
+def render_messages(chats: list[Chat], tz: tzinfo) -> None:
+    ordered = sorted(chats, key=lambda c: len(c.messages), reverse=True)
+    chosen = dict(zip(labels(ordered), ordered))
+
+    who = st.sidebar.selectbox("Person", ["Everyone", *chosen])
+    name = st.sidebar.selectbox("Measure", list(MEASURES))
+    measure = MEASURES[name]
+    unit = name.title()
+
+    if who == "Everyone":
+        render_overview(chosen, measure, unit, tz)
+    else:
+        render_conversation(chosen[who], measure, unit, tz)
 
 
 def follow_table(group: Iterable[Follow]) -> pd.DataFrame:

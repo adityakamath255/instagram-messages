@@ -3,3 +3,11 @@ maxUploadSize = 2000
 
 [browser]
 gatherUsageStats = false
+
+# Catppuccin Mocha
+[theme]
+base = "dark"
+primaryColor = "#cba6f7"
+backgroundColor = "#1e1e2e"
+secondaryBackgroundColor = "#181825"
+textColor = "#cdd6f4"

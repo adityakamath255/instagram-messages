@@ -41,22 +41,17 @@ class Chat:
     messages: Sequence[Message]
 
 
-PLACEHOLDER = "sent an attachment."
-MEDIA_KEYS = ("photos", "videos")
-
-
-def has_media(raw: Mapping) -> bool:
-    return any(raw.get(key) for key in MEDIA_KEYS)
+PLACEHOLDER = " sent an attachment."
 
 
 def message_text(raw: Mapping) -> str | None:
-    blocked = (
+    if (
         raw.get("is_unsent")
         or raw.get("call_duration") is not None
         or raw.get("audio_files")
-        or has_media(raw)
-    )
-    if blocked:
+        or raw.get("photos")
+        or raw.get("videos")
+    ):
         return None
     content = decode(raw.get("content", ""))
     return content if content and not content.endswith(PLACEHOLDER) else None
@@ -108,9 +103,16 @@ def find_root(base: Path) -> Path | None:
     return min(candidates, key=lambda d: len(d.parts), default=None)
 
 
+MAX_DECOMPRESSED = 5 * 1024**3
+
+
 def extract_export(payloads: Iterable[bytes], dest: Path) -> Path | None:
+    budget = MAX_DECOMPRESSED
     for data in payloads:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            budget -= sum(info.file_size for info in archive.infolist())
+            if budget < 0:
+                raise ValueError("export too large to extract")
             archive.extractall(dest)
     return find_root(dest)
 
