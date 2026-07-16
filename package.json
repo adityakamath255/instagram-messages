@@ -1,0 +1,23 @@
+{
+  "name": "instagram-archive",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "test": "node --experimental-strip-types test/export.test.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/unbounded": "5.2.8",
+    "@zip.js/zip.js": "2.8.31",
+    "chart.js": "4.5.1",
+    "lit": "3.3.3"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vite": "8.1.5"
+  }
+}

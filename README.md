@@ -1,11 +1,11 @@
-# Instagram messages
+# Instagram archive
 
-A local Streamlit app for exploring your own Instagram data export: message
-activity by person, hour, and weekday; reactions; and follower reciprocity and
-growth.
+A browser app for exploring your own Instagram data export: message activity
+by person, hour, and weekday; reactions; follower reciprocity; and follow
+dates.
 
-Everything runs on your machine. The export you upload is unzipped to a
-temporary directory and read in the same process; nothing is sent anywhere.
+Everything runs in your browser. The app reads only supported JSON entries
+directly from the ZIP and ignores its media. Nothing is uploaded.
 
 ## Get your data
 
@@ -39,15 +39,21 @@ date range, choose all time, so activity and follower history are complete.
 Media quality does not matter, since the app reads only the JSON data and never
 the photos or videos, so the lowest setting keeps the download small.
 
-## Run
+## Develop
 
-With [uv](https://docs.astral.sh/uv/) installed:
+Install [Node.js](https://nodejs.org/) 24 or newer, then run:
 
 ```sh
-uv run streamlit run app.py
+npm install
+npm run dev
 ```
 
-This installs the pinned dependencies on first run and opens the app in your
-browser. Upload your export `.zip` in the sidebar. If the export was split into
-several parts, upload all of them together. If you have already unzipped it,
-re-compress the export folder into a single `.zip`.
+Choose your export `.zip` in the browser. If Instagram split the export into
+several ZIP files, choose all of them together.
+
+Run the tests and production build with:
+
+```sh
+npm test
+npm run build
+```

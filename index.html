@@ -1,30 +1,16 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Instagram messages</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.css"
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Read your Instagram message and follow history locally."
     />
+    <title>Instagram archive</title>
+    <script type="module" src="/src/app.ts"></script>
   </head>
   <body>
-    <div id="root"></div>
-    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.js"></script>
-    <script>
-      stlite.mount(
-        {
-          requirements: ["pandas", "plotly"],
-          entrypoint: "app.py",
-          files: {
-            "app.py": { url: "./app.py" },
-            "core.py": { url: "./core.py" },
-            ".streamlit/config.toml": { url: "./.streamlit/config.toml" },
-          },
-        },
-        document.getElementById("root"),
-      );
-    </script>
+    <instagram-archive-app></instagram-archive-app>
   </body>
 </html>

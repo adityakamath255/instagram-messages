@@ -1,3 +1,4 @@
 context/
-__pycache__/
-.venv/
+.trash/
+dist/
+node_modules/
