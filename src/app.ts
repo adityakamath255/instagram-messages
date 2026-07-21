@@ -83,8 +83,20 @@ function formatted(value: number): string {
   return numberFormat.format(value);
 }
 
-function selectedValue<T extends string>(event: Event): T {
-  return (event.currentTarget as HTMLSelectElement).value as T;
+function selectedValue(event: Event): string | null {
+  return event.currentTarget instanceof HTMLSelectElement
+    ? event.currentTarget.value
+    : null;
+}
+
+function selectedKey<Key extends string>(
+  event: Event,
+  choices: Readonly<Record<Key, unknown>>,
+): Key | null {
+  const value = selectedValue(event);
+  return value !== null && Object.hasOwn(choices, value)
+    ? value as Key
+    : null;
 }
 
 export class InstagramArchiveApp extends LitElement {
@@ -155,7 +167,7 @@ export class InstagramArchiveApp extends LitElement {
     progress: LoadProgress | null,
   ): TemplateResult {
     const detail = progress
-      ? `Archive ${progress.archive} of ${progress.archives} · ${formatted(
+      ? `Archive ${progress.archive} of ${sources.length} · ${formatted(
           progress.files,
         )} files read`
       : "Opening archive…";
@@ -544,11 +556,13 @@ export class InstagramArchiveApp extends LitElement {
     page: OverviewPage | ConversationPage,
   ): void {
     const id = selectedValue(event);
+    if (id === null) return;
     if (!id) {
       this.show(analysis, { kind: "overview", metric: page.metric });
       return;
     }
-    const conversation = analysis.archive.conversation(id)!;
+    const conversation = analysis.archive.conversation(id);
+    if (!conversation) return;
     this.show(analysis, {
       kind: "conversation",
       conversation,
@@ -562,7 +576,8 @@ export class InstagramArchiveApp extends LitElement {
     analysis: ArchiveAnalysis,
     page: OverviewPage | ConversationPage,
   ): void {
-    this.show(analysis, { ...page, metric: selectedValue<Metric>(event) });
+    const metric = selectedKey(event, metrics);
+    if (metric) this.show(analysis, { ...page, metric });
   }
 
   private changeTrend(
@@ -570,16 +585,19 @@ export class InstagramArchiveApp extends LitElement {
     analysis: ArchiveAnalysis,
     page: ConversationPage,
   ): void {
-    this.show(analysis, { ...page, trend: selectedValue<Trend>(event) });
+    const trend = selectedKey(event, trends);
+    if (trend) this.show(analysis, { ...page, trend });
   }
 
   private changeFollowGroup(
     event: Event,
     analysis: ArchiveAnalysis,
   ): void {
+    const group = selectedKey(event, followGroups);
+    if (!group) return;
     this.show(analysis, {
       kind: "follows",
-      group: selectedValue<FollowGroup>(event),
+      group,
     });
   }
 

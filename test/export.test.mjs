@@ -225,3 +225,15 @@ test("rejects duplicate follow identities", async () => {
       error.message.includes("more than one follow entry"),
   );
 });
+
+test("rejects malformed optional message fields", async () => {
+  const complete = completeExport();
+  complete[messagePath].messages[0].photos = {};
+
+  await assert.rejects(
+    InstagramArchive.open([await archive(complete)]),
+    (error) =>
+      error instanceof ExportError &&
+      error.message.includes("message photos is not a list"),
+  );
+});

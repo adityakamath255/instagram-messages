@@ -41,7 +41,7 @@ the photos or videos, so the lowest setting keeps the download small.
 
 ## Develop
 
-Install [Node.js](https://nodejs.org/) 24 or newer, then run:
+Install [Node.js](https://nodejs.org/) 26 or newer, then run:
 
 ```sh
 npm install

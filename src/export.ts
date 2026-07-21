@@ -35,7 +35,6 @@ export interface ArchiveSource extends Blob {
 
 export interface LoadProgress {
   readonly archive: number;
-  readonly archives: number;
   readonly files: number;
 }
 
@@ -148,6 +147,24 @@ function number(value: unknown, context: string): number {
   return value;
 }
 
+function optionalBoolean(value: unknown, context: string): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value !== "boolean") fail(`${context} is not true or false.`);
+  return value;
+}
+
+function hasItems(value: unknown, context: string): boolean {
+  return value === undefined || value === null
+    ? false
+    : array(value, context).length > 0;
+}
+
+function hasNumber(value: unknown, context: string): boolean {
+  if (value === undefined || value === null) return false;
+  number(value, context);
+  return true;
+}
+
 function parseJson(path: string, source: string): unknown {
   try {
     return JSON.parse(source) as unknown;
@@ -193,7 +210,6 @@ async function readArchives(
   let count = 0;
   const report = (archive: number) => onProgress?.({
     archive,
-    archives: archives.length,
     files: count,
   });
 
@@ -263,17 +279,18 @@ function selfName(files: ReadonlyMap<string, string>): string {
   return decodeInstagramText(string(value, `${personalInfo}: profile name`));
 }
 
-function hasMedia(value: unknown): boolean {
-  return Array.isArray(value) ? value.length > 0 : Boolean(value);
-}
-
 function messageText(raw: JsonObject): string | null {
+  const isUnsent = optionalBoolean(raw.is_unsent, "message is_unsent");
+  const isCall = hasNumber(raw.call_duration, "message call_duration");
+  const hasAudio = hasItems(raw.audio_files, "message audio_files");
+  const hasPhotos = hasItems(raw.photos, "message photos");
+  const hasVideos = hasItems(raw.videos, "message videos");
   if (
-    raw.is_unsent ||
-    raw.call_duration != null ||
-    hasMedia(raw.audio_files) ||
-    hasMedia(raw.photos) ||
-    hasMedia(raw.videos)
+    isUnsent ||
+    isCall ||
+    hasAudio ||
+    hasPhotos ||
+    hasVideos
   ) {
     return null;
   }
