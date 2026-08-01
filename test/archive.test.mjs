@@ -15,7 +15,7 @@ import {
   decodeInstagramText,
   ExportError,
   InstagramArchive,
-} from "../src/export.ts";
+} from "../src/archive.ts";
 
 async function archive(files) {
   const writer = new ZipWriter(new BlobWriter("application/zip"));
@@ -97,7 +97,7 @@ function completeExport() {
   };
 }
 
-test("loads a complete archive", async () => {
+test("loads and analyzes a complete archive", async () => {
   const data = await InstagramArchive.open([await archive(completeExport())]);
 
   assert.equal(decodeInstagramText("JosÃ©"), "José");
@@ -110,21 +110,14 @@ test("loads a complete archive", async () => {
   assert.equal(data.conversations[0].messages[0].reactions[0].emoji, "😂");
   const analysis = new ArchiveAnalysis(data);
   const conversation = data.conversations[0];
+  const overview = analysis.overview("Messages");
   const messageReport = analysis.conversation(conversation, "Messages");
   const characterReport = analysis.conversation(conversation, "Characters");
-  assert.equal(
-    analysis.conversation(conversation, "Messages"),
-    messageReport,
-  );
-  assert.equal(analysis.overview("Messages"), analysis.overview("Messages"));
-  assert.equal(
-    analysis.overview("Messages").conversationTotals,
-    analysis.overview("Messages").conversationTotals,
-  );
-  assert.deepEqual(analysis.overview("Messages").conversationTotals, [{
+  assert.deepEqual(overview.conversationTotals, [{
     label: "Ana",
     value: 2,
   }]);
+  assert.deepEqual(overview.byAuthor, { self: 1, other: 1 });
   assert.equal(
     messageReport.byAuthor.self + messageReport.byAuthor.other,
     2,
@@ -142,6 +135,11 @@ test("loads a complete archive", async () => {
     trends.Cumulative(characterReport).map(({ value }) => value),
     [6],
   );
+  assert.deepEqual(messageReport.reactions, [{
+    emoji: "😂",
+    self: 0,
+    other: 1,
+  }]);
 
   assert.deepEqual(
     data.follows.group("mutual").map(({ username }) => username),
@@ -235,5 +233,28 @@ test("rejects malformed optional message fields", async () => {
     (error) =>
       error instanceof ExportError &&
       error.message.includes("message photos is not a list"),
+  );
+});
+
+test("rejects invalid timestamps", async () => {
+  const invalidMessage = completeExport();
+  invalidMessage[messagePath].messages[0].timestamp_ms = Number.MAX_SAFE_INTEGER;
+
+  await assert.rejects(
+    InstagramArchive.open([await archive(invalidMessage)]),
+    (error) =>
+      error instanceof ExportError &&
+      error.message.includes("message timestamp is not a valid timestamp"),
+  );
+
+  const invalidFollow = completeExport();
+  invalidFollow[followersPath][0].string_list_data[0].timestamp =
+    Number.MAX_SAFE_INTEGER;
+
+  await assert.rejects(
+    InstagramArchive.open([await archive(invalidFollow)]),
+    (error) =>
+      error instanceof ExportError &&
+      error.message.includes("follow timestamp is not a valid timestamp"),
   );
 });

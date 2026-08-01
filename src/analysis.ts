@@ -3,7 +3,7 @@ import type {
   Conversation,
   InstagramArchive,
   Message,
-} from "./export.ts";
+} from "./archive.ts";
 
 export const metrics = {
   Messages: (_message: Message) => 1,
@@ -152,15 +152,14 @@ class MessageAnalyzer {
   }
 }
 
-export interface OverviewAnalysis {
-  readonly report: MessageReport;
+export interface OverviewReport extends MessageReport {
   readonly conversationTotals: readonly Datum[];
 }
 
 function analyzeOverview(
   conversations: readonly Conversation[],
   metric: Metric,
-): OverviewAnalysis {
+): OverviewReport {
   const analyzer = new MessageAnalyzer(metric);
   const totals: Datum[] = [];
 
@@ -174,7 +173,7 @@ function analyzeOverview(
 
   totals.sort((left, right) => right.value - left.value);
   return {
-    report: analyzer.report(),
+    ...analyzer.report(),
     conversationTotals: totals.slice(0, 25),
   };
 }
@@ -190,7 +189,7 @@ function analyzeMessages(
 
 export class ArchiveAnalysis {
   readonly archive: InstagramArchive;
-  readonly #overviews = new Map<Metric, OverviewAnalysis>();
+  readonly #overviews = new Map<Metric, OverviewReport>();
   readonly #conversationReports = new WeakMap<
     Conversation,
     Map<Metric, MessageReport>
@@ -213,7 +212,7 @@ export class ArchiveAnalysis {
       analyzeMessages(conversation.messages, metric));
   }
 
-  overview(metric: Metric): OverviewAnalysis {
+  overview(metric: Metric): OverviewReport {
     return cached(this.#overviews, metric, () =>
       analyzeOverview(this.archive.conversations, metric));
   }

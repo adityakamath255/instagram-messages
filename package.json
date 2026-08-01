@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "node --experimental-strip-types test/export.test.mjs"
+    "test": "node --experimental-strip-types test/archive.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/unbounded": "5.2.8",

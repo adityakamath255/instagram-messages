@@ -39,6 +39,19 @@ date range, choose all time, so activity and follower history are complete.
 Media quality does not matter, since the app reads only the JSON data and never
 the photos or videos, so the lowest setting keeps the download small.
 
+## Code
+
+The runtime path is `ZIP files → InstagramArchive → ArchiveAnalysis → Lit →
+Chart.js`. The four TypeScript modules follow that path:
+
+- `src/archive.ts` reads the ZIP files and parses them into the archive model.
+- `src/analysis.ts` derives and caches message reports from that model.
+- `src/app.ts` owns page state and renders the upload, message, and follow views.
+- `src/charts.ts` translates chart specifications into Chart.js instances.
+
+Read them in that order. `src/styles.css` contains the visual design and does
+not affect archive parsing or analysis.
+
 ## Develop
 
 Install [Node.js](https://nodejs.org/) 26 or newer, then run:

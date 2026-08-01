@@ -24,7 +24,7 @@ import {
   type Conversation,
   type FollowGroup,
   type LoadProgress,
-} from "./export.ts";
+} from "./archive.ts";
 
 type OverviewPage = {
   readonly kind: "overview";
@@ -275,7 +275,7 @@ export class InstagramArchiveApp extends LitElement {
       : null;
     const report = conversation
       ? analysis.conversation(conversation, page.metric)
-      : analysis.overview(page.metric).report;
+      : analysis.overview(page.metric);
     const total = report.byAuthor.self + report.byAuthor.other;
     return html`
       <section class="report-head">
@@ -307,7 +307,7 @@ export class InstagramArchiveApp extends LitElement {
           ? guard([analysis, page.metric], () =>
               this.peopleChart(analysis, page.metric))
           : nothing}
-        ${guard([report], () => this.chartCard({
+        ${guard([analysis, conversation, page.metric], () => this.chartCard({
           title: `${page.metric} by hour`,
           kind: "bar",
           datasets: [{
@@ -316,7 +316,7 @@ export class InstagramArchiveApp extends LitElement {
             tone: "primary",
           }],
         }, "Your local time"))}
-        ${guard([report], () => this.chartCard({
+        ${guard([analysis, conversation, page.metric], () => this.chartCard({
           title: `${page.metric} by weekday`,
           kind: "bar",
           datasets: [{
@@ -326,10 +326,16 @@ export class InstagramArchiveApp extends LitElement {
           }],
         }, "Monday through Sunday"))}
         ${page.kind === "conversation"
-          ? guard([report, page.trend], () => this.trendChart(report, page))
+          ? guard(
+              [analysis, conversation, page.metric, page.trend],
+              () => this.trendChart(report, page),
+            )
           : nothing}
         ${report.reactions.length
-          ? guard([report], () => this.reactionChart(report.reactions))
+          ? guard(
+              [analysis, conversation],
+              () => this.reactionChart(report.reactions),
+            )
           : this.emptyCard("Top reactions", "No reactions in this selection.")}
       </div>
     `;

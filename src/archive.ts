@@ -6,6 +6,9 @@ import {
 
 export type Author = "self" | "other";
 
+declare const timestampBrand: unique symbol;
+export type Timestamp = number & { readonly [timestampBrand]: true };
+
 export interface Reaction {
   readonly emoji: string;
   readonly actor: Author;
@@ -13,7 +16,7 @@ export interface Reaction {
 
 export interface Message {
   readonly author: Author;
-  readonly timestamp: number;
+  readonly timestamp: Timestamp;
   readonly reactions: readonly Reaction[];
   readonly text: string | null;
 }
@@ -26,7 +29,7 @@ export interface Conversation {
 
 export interface Follow {
   readonly username: string;
-  readonly followedAt: number;
+  readonly followedAt: Timestamp;
 }
 
 export interface ArchiveSource extends Blob {
@@ -145,6 +148,21 @@ function number(value: unknown, context: string): number {
     fail(`${context} is not a number.`);
   }
   return value;
+}
+
+function parseTimestamp(
+  value: unknown,
+  multiplier: 1 | 1000,
+  context: string,
+): Timestamp {
+  const milliseconds = number(value, context) * multiplier;
+  if (
+    !Number.isSafeInteger(milliseconds) ||
+    Number.isNaN(new Date(milliseconds).getTime())
+  ) {
+    fail(`${context} is not a valid timestamp.`);
+  }
+  return milliseconds as Timestamp;
 }
 
 function optionalBoolean(value: unknown, context: string): boolean {
@@ -312,7 +330,7 @@ function parseMessage(value: unknown, me: string): Message {
     : array(raw.reactions, "message reactions");
   return {
     author: authorOf(raw.sender_name, me, "message sender"),
-    timestamp: number(raw.timestamp_ms, "message timestamp"),
+    timestamp: parseTimestamp(raw.timestamp_ms, 1, "message timestamp"),
     reactions: reactions.map((value) => {
       const reaction = object(value, "reaction");
       return {
@@ -386,7 +404,7 @@ function parseFollows(entries: readonly unknown[]): readonly Follow[] {
       const item = object(value, "follow data");
       return {
         username: followName(entry, item),
-        followedAt: number(item.timestamp, "follow timestamp") * 1000,
+        followedAt: parseTimestamp(item.timestamp, 1000, "follow timestamp"),
       };
     });
   });
