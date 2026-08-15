@@ -48,17 +48,9 @@ export class ExportError extends Error {
 export type FollowGroup = "mutual" | "you-follow" | "follows-you";
 
 function indexFollows(follows: readonly Follow[]): ReadonlyMap<string, Follow> {
-  const indexed = new Map<string, Follow>();
-  for (const follow of follows) {
-    const username = follow.username.toLowerCase();
-    if (indexed.has(username)) {
-      throw new ExportError(
-        `The export contains more than one follow entry for @${follow.username}.`,
-      );
-    }
-    indexed.set(username, follow);
-  }
-  return indexed;
+  return new Map(follows.map((follow) =>
+    [follow.username.toLowerCase(), follow] as const
+  ));
 }
 
 export class FollowNetwork {
@@ -105,8 +97,6 @@ export class FollowNetwork {
   }
 }
 
-type JsonObject = Record<string, unknown>;
-
 const messageRoot = "your_instagram_activity/messages";
 const followsRoot = "connections/followers_and_following";
 const personalInfo =
@@ -126,66 +116,9 @@ function fail(message: string): never {
   throw new ExportError(message);
 }
 
-function object(value: unknown, context: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    fail(`${context} is not an object.`);
-  }
-  return value as JsonObject;
-}
-
-function array(value: unknown, context: string): readonly unknown[] {
-  if (!Array.isArray(value)) fail(`${context} is not a list.`);
-  return value;
-}
-
-function string(value: unknown, context: string): string {
-  if (typeof value !== "string") fail(`${context} is not text.`);
-  return value;
-}
-
-function number(value: unknown, context: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    fail(`${context} is not a number.`);
-  }
-  return value;
-}
-
-function parseTimestamp(
-  value: unknown,
-  multiplier: 1 | 1000,
-  context: string,
-): Timestamp {
-  const milliseconds = number(value, context) * multiplier;
-  if (
-    !Number.isSafeInteger(milliseconds) ||
-    Number.isNaN(new Date(milliseconds).getTime())
-  ) {
-    fail(`${context} is not a valid timestamp.`);
-  }
-  return milliseconds as Timestamp;
-}
-
-function optionalBoolean(value: unknown, context: string): boolean {
-  if (value === undefined || value === null) return false;
-  if (typeof value !== "boolean") fail(`${context} is not true or false.`);
-  return value;
-}
-
-function hasItems(value: unknown, context: string): boolean {
-  return value === undefined || value === null
-    ? false
-    : array(value, context).length > 0;
-}
-
-function hasNumber(value: unknown, context: string): boolean {
-  if (value === undefined || value === null) return false;
-  number(value, context);
-  return true;
-}
-
-function parseJson(path: string, source: string): unknown {
+function parseJson(path: string, source: string): any {
   try {
-    return JSON.parse(source) as unknown;
+    return JSON.parse(source);
   } catch {
     return fail(`${path} does not contain valid JSON.`);
   }
@@ -211,7 +144,7 @@ function logicalPath(path: string): string | null {
     : null;
 }
 
-function required(path: string): boolean {
+function supported(path: string): boolean {
   return (
     path === personalInfo ||
     path === `${followsRoot}/following.json` ||
@@ -237,7 +170,7 @@ async function readArchives(
       for await (const entry of reader.getEntriesGenerator()) {
         if (entry.directory) continue;
         const path = logicalPath(entry.filename);
-        if (!path || !required(path)) continue;
+        if (!path || !supported(path)) continue;
         const source = await entry.getData(new TextWriter());
         const previous = files.get(path);
         if (previous !== undefined && previous !== source) {
@@ -281,98 +214,76 @@ export function decodeInstagramText(value: string): string {
   }
 }
 
-function selfName(files: ReadonlyMap<string, string>): string {
-  const root = object(
-    parseJson(personalInfo, requiredFile(files, personalInfo)),
-    personalInfo,
-  );
-  const profiles = array(root.profile_user, `${personalInfo}: profile_user`);
-  const profile = object(profiles[0], `${personalInfo}: first profile`);
-  const info = object(
-    profile.string_map_data,
-    `${personalInfo}: string_map_data`,
-  );
-  const field = info.Name ?? info.Username;
-  const value = object(field, `${personalInfo}: Name or Username`).value;
-  return decodeInstagramText(string(value, `${personalInfo}: profile name`));
+function selfName(source: string): string {
+  const root = parseJson(personalInfo, source);
+  const info = root.profile_user[0]?.string_map_data;
+  const name = info?.Name?.value ?? info?.Username?.value;
+  return name
+    ? decodeInstagramText(name)
+    : fail(`${personalInfo} has no profile name.`);
 }
 
-function messageText(raw: JsonObject): string | null {
-  const isUnsent = optionalBoolean(raw.is_unsent, "message is_unsent");
-  const isCall = hasNumber(raw.call_duration, "message call_duration");
-  const hasAudio = hasItems(raw.audio_files, "message audio_files");
-  const hasPhotos = hasItems(raw.photos, "message photos");
-  const hasVideos = hasItems(raw.videos, "message videos");
+function messageText(raw: any): string | null {
   if (
-    isUnsent ||
-    isCall ||
-    hasAudio ||
-    hasPhotos ||
-    hasVideos
+    raw.is_unsent ||
+    raw.call_duration != null ||
+    raw.audio_files?.length ||
+    raw.photos?.length ||
+    raw.videos?.length
   ) {
     return null;
   }
-  const content = raw.content === undefined
-    ? ""
-    : string(raw.content, "message content");
-  const decoded = decodeInstagramText(content);
+  const decoded = decodeInstagramText(raw.content ?? "");
   return decoded && !decoded.endsWith(attachmentPlaceholder) ? decoded : null;
 }
 
-function authorOf(value: unknown, me: string, context: string): Author {
-  return decodeInstagramText(string(value, context)) === me ? "self" : "other";
+function authorOf(name: string, me: string): Author {
+  return decodeInstagramText(name) === me ? "self" : "other";
 }
 
-function parseMessage(value: unknown, me: string): Message {
-  const raw = object(value, "message");
-  const reactions = raw.reactions === undefined
-    ? []
-    : array(raw.reactions, "message reactions");
+function parseMessage(raw: any, me: string): Message {
   return {
-    author: authorOf(raw.sender_name, me, "message sender"),
-    timestamp: parseTimestamp(raw.timestamp_ms, 1, "message timestamp"),
-    reactions: reactions.map((value) => {
-      const reaction = object(value, "reaction");
-      return {
-        emoji: decodeInstagramText(string(reaction.reaction, "reaction")),
-        actor: authorOf(reaction.actor, me, "reaction actor"),
-      };
-    }),
+    author: authorOf(raw.sender_name, me),
+    timestamp: raw.timestamp_ms as Timestamp,
+    reactions: (raw.reactions ?? []).map((reaction: any) => ({
+      emoji: decodeInstagramText(reaction.reaction),
+      actor: authorOf(reaction.actor, me),
+    })),
     text: messageText(raw),
   };
 }
 
-interface RawThread {
-  readonly participants: Set<string>;
-  readonly messages: unknown[];
-}
-
 function conversations(
   files: ReadonlyMap<string, string>,
-  me: string,
 ): readonly Conversation[] {
-  const threads = new Map<string, RawThread>();
+  if (![...files.keys()].some((path) => messageFile.test(path))) return [];
+
+  const profile = files.get(personalInfo);
+  if (profile === undefined) return [];
+
+  const me = selfName(profile);
+  const threads = new Map<
+    string,
+    { participants: Set<string>; messages: unknown[] }
+  >();
 
   for (const [path, source] of files) {
     const match = messageFile.exec(path);
     if (!match) continue;
     const id = `${match[1]}/${match[2]}`;
-    const data = object(parseJson(path, source), path);
+    const data = parseJson(path, source);
     const thread = threads.get(id) ?? {
       participants: new Set<string>(),
       messages: [],
     };
-    for (const value of array(data.participants, `${path}: participants`)) {
-      const participant = object(value, `${path}: participant`);
+    for (const participant of data.participants) {
       thread.participants.add(
-        decodeInstagramText(string(participant.name, `${path}: participant name`)),
+        decodeInstagramText(participant.name),
       );
     }
-    thread.messages.push(...array(data.messages, `${path}: messages`));
+    thread.messages.push(...data.messages);
     threads.set(id, thread);
   }
-
-  if (!threads.size) fail(`The export is missing ${messageRoot}.`);
 
   return [...threads].flatMap(([id, thread]) => {
     const others = [...thread.participants].filter((name) => name !== me);
@@ -388,26 +299,21 @@ function conversations(
   });
 }
 
-function followName(entry: JsonObject, item: JsonObject): string {
+function followName(entry: any, item: any): string {
   for (const candidate of [item.value, entry.title]) {
-    if (typeof candidate === "string" && candidate) return candidate;
+    if (candidate) return candidate;
   }
-  const href = string(item.href, "follow profile link");
-  const username = href.replace(/\/$/, "").split("/").at(-1);
+  const username = item.href?.replace(/\/$/, "").split("/").at(-1);
   return username || fail("A follow entry has no username.");
 }
 
-function parseFollows(entries: readonly unknown[]): readonly Follow[] {
-  return entries.flatMap((value) => {
-    const entry = object(value, "follow entry");
-    return array(entry.string_list_data, "follow entry data").map((value) => {
-      const item = object(value, "follow data");
-      return {
-        username: followName(entry, item),
-        followedAt: parseTimestamp(item.timestamp, 1000, "follow timestamp"),
-      };
-    });
-  });
+function parseFollows(entries: readonly any[]): readonly Follow[] {
+  return entries.flatMap((entry) =>
+    entry.string_list_data.map((item: any) => ({
+      username: followName(entry, item),
+      followedAt: item.timestamp * 1000 as Timestamp,
+    }))
+  );
 }
 
 function followerList(files: ReadonlyMap<string, string>): readonly Follow[] {
@@ -421,10 +327,8 @@ function followerList(files: ReadonlyMap<string, string>): readonly Follow[] {
 
 function followingList(files: ReadonlyMap<string, string>): readonly Follow[] {
   const path = `${followsRoot}/following.json`;
-  const data = object(parseJson(path, requiredFile(files, path)), path);
-  return parseFollows(
-    array(data.relationships_following, `${path}: relationships_following`),
-  );
+  const data = parseJson(path, requiredFile(files, path));
+  return parseFollows(data.relationships_following);
 }
 
 export class InstagramArchive {
@@ -448,10 +352,9 @@ export class InstagramArchive {
   ): Promise<InstagramArchive> {
     if (!archives.length) fail("Choose at least one Instagram export archive.");
     const files = await readArchives(archives, onProgress);
-    const me = selfName(files);
     return new InstagramArchive(
       archives.map((archive, index) => archive.name || `Archive ${index + 1}`),
-      conversations(files, me),
+      conversations(files),
       new FollowNetwork(followerList(files), followingList(files)),
     );
   }

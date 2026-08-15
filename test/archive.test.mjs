@@ -171,6 +171,23 @@ test("combines split archives", async () => {
   assert.equal(data.follows.followingCount, 2);
 });
 
+test("loads follow data without message or profile data", async () => {
+  const files = completeExport();
+  const followFiles = Object.fromEntries(
+    Object.entries(files).filter(([path]) =>
+      path === followersPath || path === followingPath
+    ),
+  );
+
+  const data = await InstagramArchive.open([await archive(followFiles)]);
+
+  assert.deepEqual(data.conversations, []);
+  assert.deepEqual(
+    data.follows.group("you-follow").map(({ username }) => username),
+    ["lee"],
+  );
+});
+
 test("rejects conflicting files across archives", async () => {
   const first = await archive({
     [personalPath]: { profile_user: [] },
@@ -197,64 +214,5 @@ test("rejects an incomplete export", async () => {
     (error) =>
       error instanceof ExportError &&
       error.message.includes("following.json"),
-  );
-});
-
-test("rejects duplicate follow identities", async () => {
-  const complete = completeExport();
-  const duplicate = {
-    ...complete,
-    [followersPath]: [
-      ...complete[followersPath],
-      {
-        string_list_data: [{
-          value: "sam",
-          href: "https://www.instagram.com/sam/",
-          timestamp: 1_600_000_400,
-        }],
-      },
-    ],
-  };
-
-  await assert.rejects(
-    InstagramArchive.open([await archive(duplicate)]),
-    (error) =>
-      error instanceof ExportError &&
-      error.message.includes("more than one follow entry"),
-  );
-});
-
-test("rejects malformed optional message fields", async () => {
-  const complete = completeExport();
-  complete[messagePath].messages[0].photos = {};
-
-  await assert.rejects(
-    InstagramArchive.open([await archive(complete)]),
-    (error) =>
-      error instanceof ExportError &&
-      error.message.includes("message photos is not a list"),
-  );
-});
-
-test("rejects invalid timestamps", async () => {
-  const invalidMessage = completeExport();
-  invalidMessage[messagePath].messages[0].timestamp_ms = Number.MAX_SAFE_INTEGER;
-
-  await assert.rejects(
-    InstagramArchive.open([await archive(invalidMessage)]),
-    (error) =>
-      error instanceof ExportError &&
-      error.message.includes("message timestamp is not a valid timestamp"),
-  );
-
-  const invalidFollow = completeExport();
-  invalidFollow[followersPath][0].string_list_data[0].timestamp =
-    Number.MAX_SAFE_INTEGER;
-
-  await assert.rejects(
-    InstagramArchive.open([await archive(invalidFollow)]),
-    (error) =>
-      error instanceof ExportError &&
-      error.message.includes("follow timestamp is not a valid timestamp"),
   );
 });

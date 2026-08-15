@@ -26,31 +26,29 @@ To export to your device:
 Instagram emails you when the export is ready. It arrives as one or more `.zip`
 files. Keep them zipped.
 
-### Export settings that matter
+### Export settings
 
 The customization step lets you choose which information to include, a date
 range, a format, the notification email, and media quality. Four of these
 affect whether this app can read the export.
 
-For information, select all of your information, or at minimum the three
-categories the app reads: Messages, Personal information, and Followers and
-following. For format, choose JSON; the app cannot read the HTML export. For
-date range, choose all time, so activity and follower history are complete.
-Media quality does not matter, since the app reads only the JSON data and never
-the photos or videos, so the lowest setting keeps the download small.
+For information, select all of your information to use every view. The app
+reads Messages, Personal information, and Followers and following. For the
+follow-back report alone, Followers and following is enough. For format, choose
+JSON; the app cannot read the HTML export. For date range, choose all time, so
+activity and follower history are complete. Media quality does not matter,
+since the app reads only the JSON data and never the photos or videos, so the
+lowest setting keeps the download small.
 
 ## Code
 
-The runtime path is `ZIP files → InstagramArchive → ArchiveAnalysis → Lit →
+The runtime path is `ZIP files -> InstagramArchive -> ArchiveAnalysis -> Lit -> 
 Chart.js`. The four TypeScript modules follow that path:
 
 - `src/archive.ts` reads the ZIP files and parses them into the archive model.
 - `src/analysis.ts` derives and caches message reports from that model.
 - `src/app.ts` owns page state and renders the upload, message, and follow views.
 - `src/charts.ts` translates chart specifications into Chart.js instances.
-
-Read them in that order. `src/styles.css` contains the visual design and does
-not affect archive parsing or analysis.
 
 ## Develop
 
