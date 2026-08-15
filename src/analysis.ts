@@ -1,7 +1,6 @@
 import type {
   Author,
   Conversation,
-  InstagramArchive,
   Message,
 } from "./archive.ts";
 
@@ -188,15 +187,15 @@ function analyzeMessages(
 }
 
 export class ArchiveAnalysis {
-  readonly archive: InstagramArchive;
+  readonly #conversations: readonly Conversation[];
   readonly #overviews = new Map<Metric, OverviewReport>();
   readonly #conversationReports = new WeakMap<
     Conversation,
     Map<Metric, MessageReport>
   >();
 
-  constructor(archive: InstagramArchive) {
-    this.archive = archive;
+  constructor(conversations: readonly Conversation[]) {
+    this.#conversations = conversations;
   }
 
   conversation(
@@ -214,6 +213,6 @@ export class ArchiveAnalysis {
 
   overview(metric: Metric): OverviewReport {
     return cached(this.#overviews, metric, () =>
-      analyzeOverview(this.archive.conversations, metric));
+      analyzeOverview(this.#conversations, metric));
   }
 }

@@ -9,22 +9,19 @@ import {
 } from "lit";
 import { guard } from "lit/directives/guard.js";
 
-import {
-  ArchiveAnalysis,
-  metrics,
-  trends,
-  type MessageReport,
-  type Metric,
-  type Trend,
-} from "./analysis.ts";
 import type { ChartSpec } from "./charts.ts";
 import {
   ExportError,
   InstagramArchive,
-  type Conversation,
+  metrics,
+  trends,
+  type ConversationSummary,
   type FollowGroup,
   type FollowNetwork,
   type LoadProgress,
+  type MessageReport,
+  type Metric,
+  type Trend,
 } from "./archive.ts";
 
 type OverviewPage = {
@@ -34,7 +31,7 @@ type OverviewPage = {
 
 type ConversationPage = {
   readonly kind: "conversation";
-  readonly conversation: Conversation;
+  readonly conversation: ConversationSummary;
   readonly metric: Metric;
   readonly trend: Trend;
 };
@@ -58,7 +55,7 @@ type AppState =
 
 type ReadyState = {
   readonly kind: "ready";
-  readonly analysis: ArchiveAnalysis;
+  readonly archive: InstagramArchive;
   readonly page: Page;
 };
 
@@ -116,7 +113,7 @@ export class InstagramArchiveApp extends LitElement {
       case "loading":
         return this.loadingPage(this.#state.sources, this.#state.progress);
       case "ready":
-        return this.readyPage(this.#state.analysis, this.#state.page);
+        return this.readyPage(this.#state.archive, this.#state.page);
     }
   }
 
@@ -231,10 +228,9 @@ export class InstagramArchiveApp extends LitElement {
   }
 
   private readyPage(
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
     page: Page,
   ): TemplateResult {
-    const { archive } = analysis;
     return html`
       <div class="app-shell">
         <header class="topbar">
@@ -257,7 +253,7 @@ export class InstagramArchiveApp extends LitElement {
             ? html`
                 <button
                   aria-current=${page.kind === "follows" ? nothing : "page"}
-                  @click=${() => this.show(analysis, initialMessagePage)}
+                  @click=${() => this.show(archive, initialMessagePage)}
                 >Messages</button>
               `
             : nothing}
@@ -265,7 +261,7 @@ export class InstagramArchiveApp extends LitElement {
             ? html`
                 <button
                   aria-current=${page.kind === "follows" ? "page" : nothing}
-                  @click=${() => this.show(analysis, initialFollowPage)}
+                  @click=${() => this.show(archive, initialFollowPage)}
                 >Follows</button>
               `
             : nothing}
@@ -273,9 +269,9 @@ export class InstagramArchiveApp extends LitElement {
         <main class="report">
           ${page.kind === "follows"
             ? archive.follows
-              ? this.followView(analysis, archive.follows, page)
+              ? this.followView(archive, archive.follows, page)
               : nothing
-            : this.messageView(analysis, page)}
+            : this.messageView(archive, page)}
         </main>
         <footer>
           Processed in this browser. Reloading clears the archive.
@@ -285,15 +281,15 @@ export class InstagramArchiveApp extends LitElement {
   }
 
   private messageView(
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
     page: OverviewPage | ConversationPage,
   ): TemplateResult {
     const conversation = page.kind === "conversation"
       ? page.conversation
       : null;
     const report = conversation
-      ? analysis.conversation(conversation, page.metric)
-      : analysis.overview(page.metric);
+      ? conversation.report(page.metric)
+      : archive.overview(page.metric);
     const total = report.byAuthor.self + report.byAuthor.other;
     return html`
       <section class="report-head">
@@ -319,13 +315,13 @@ export class InstagramArchiveApp extends LitElement {
             `
           : nothing}
       </section>
-      ${this.messageControls(analysis, page)}
+      ${this.messageControls(archive, page)}
       <div class="card-grid">
         ${page.kind === "overview"
-          ? guard([analysis, page.metric], () =>
-              this.peopleChart(analysis, page.metric))
+          ? guard([archive, page.metric], () =>
+              this.peopleChart(archive, page.metric))
           : nothing}
-        ${guard([analysis, conversation, page.metric], () => this.chartCard({
+        ${guard([archive, conversation, page.metric], () => this.chartCard({
           title: `${page.metric} by hour`,
           kind: "bar",
           datasets: [{
@@ -334,7 +330,7 @@ export class InstagramArchiveApp extends LitElement {
             tone: "primary",
           }],
         }, "Your local time"))}
-        ${guard([analysis, conversation, page.metric], () => this.chartCard({
+        ${guard([archive, conversation, page.metric], () => this.chartCard({
           title: `${page.metric} by weekday`,
           kind: "bar",
           datasets: [{
@@ -345,13 +341,13 @@ export class InstagramArchiveApp extends LitElement {
         }, "Monday through Sunday"))}
         ${page.kind === "conversation"
           ? guard(
-              [analysis, conversation, page.metric, page.trend],
+              [archive, conversation, page.metric, page.trend],
               () => this.trendChart(report, page),
             )
           : nothing}
         ${report.reactions.length
           ? guard(
-              [analysis, conversation],
+              [archive, conversation],
               () => this.reactionChart(report.reactions),
             )
           : this.emptyCard("Top reactions", "No reactions in this selection.")}
@@ -360,10 +356,9 @@ export class InstagramArchiveApp extends LitElement {
   }
 
   private messageControls(
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
     page: OverviewPage | ConversationPage,
   ): TemplateResult {
-    const { archive } = analysis;
     const conversationId = page.kind === "conversation"
       ? page.conversation.id
       : "";
@@ -373,7 +368,7 @@ export class InstagramArchiveApp extends LitElement {
           <span>Conversation</span>
           <select
             @change=${(event: Event) =>
-              this.changeConversation(event, analysis, page)}
+              this.changeConversation(event, archive, page)}
           >
             <option value="" ?selected=${page.kind === "overview"}>
               Everyone
@@ -384,7 +379,7 @@ export class InstagramArchiveApp extends LitElement {
                 ?selected=${conversation.id === conversationId}
               >
                 ${conversation.person} · ${formatted(
-                  conversation.messages.length,
+                  conversation.messageCount,
                 )}
               </option>
             `)}
@@ -394,7 +389,7 @@ export class InstagramArchiveApp extends LitElement {
           <span>Count</span>
           <select
             @change=${(event: Event) =>
-              this.changeMetric(event, analysis, page)}
+              this.changeMetric(event, archive, page)}
           >
             ${Object.keys(metrics).map((value) => html`
               <option value=${value} ?selected=${value === page.metric}>
@@ -409,7 +404,7 @@ export class InstagramArchiveApp extends LitElement {
                 <span>Over time</span>
                 <select
                   @change=${(event: Event) =>
-                    this.changeTrend(event, analysis, page)}
+                    this.changeTrend(event, archive, page)}
                 >
                   ${Object.keys(trends).map((value) => html`
                     <option value=${value} ?selected=${value === page.trend}>
@@ -425,7 +420,7 @@ export class InstagramArchiveApp extends LitElement {
   }
 
   private peopleChart(
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
     metric: Metric,
   ): TemplateResult {
     const spec: ChartSpec = {
@@ -434,7 +429,7 @@ export class InstagramArchiveApp extends LitElement {
       horizontal: true,
       datasets: [{
         label: metric,
-        data: analysis.overview(metric).conversationTotals,
+        data: archive.overview(metric).conversationTotals,
         tone: "primary",
       }],
     };
@@ -512,7 +507,7 @@ export class InstagramArchiveApp extends LitElement {
   }
 
   private followView(
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
     follows: FollowNetwork,
     page: FollowPage,
   ): TemplateResult {
@@ -532,7 +527,7 @@ export class InstagramArchiveApp extends LitElement {
           <span>Relationship</span>
           <select
             @change=${(event: Event) =>
-              this.changeFollowGroup(event, analysis)}
+              this.changeFollowGroup(event, archive)}
           >
             ${Object.entries(followGroups).map(([value, label]) => html`
               <option value=${value} ?selected=${value === page.group}>
@@ -570,24 +565,24 @@ export class InstagramArchiveApp extends LitElement {
     `;
   }
 
-  private show(analysis: ArchiveAnalysis, page: Page): void {
-    this.setState({ kind: "ready", analysis, page });
+  private show(archive: InstagramArchive, page: Page): void {
+    this.setState({ kind: "ready", archive, page });
   }
 
   private changeConversation(
     event: Event,
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
     page: OverviewPage | ConversationPage,
   ): void {
     const id = selectedValue(event);
     if (id === null) return;
     if (!id) {
-      this.show(analysis, { kind: "overview", metric: page.metric });
+      this.show(archive, { kind: "overview", metric: page.metric });
       return;
     }
-    const conversation = analysis.archive.conversation(id);
+    const conversation = archive.conversation(id);
     if (!conversation) return;
-    this.show(analysis, {
+    this.show(archive, {
       kind: "conversation",
       conversation,
       metric: page.metric,
@@ -597,29 +592,29 @@ export class InstagramArchiveApp extends LitElement {
 
   private changeMetric(
     event: Event,
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
     page: OverviewPage | ConversationPage,
   ): void {
     const metric = selectedKey(event, metrics);
-    if (metric) this.show(analysis, { ...page, metric });
+    if (metric) this.show(archive, { ...page, metric });
   }
 
   private changeTrend(
     event: Event,
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
     page: ConversationPage,
   ): void {
     const trend = selectedKey(event, trends);
-    if (trend) this.show(analysis, { ...page, trend });
+    if (trend) this.show(archive, { ...page, trend });
   }
 
   private changeFollowGroup(
     event: Event,
-    analysis: ArchiveAnalysis,
+    archive: InstagramArchive,
   ): void {
     const group = selectedKey(event, followGroups);
     if (!group) return;
-    this.show(analysis, {
+    this.show(archive, {
       kind: "follows",
       group,
     });
@@ -637,7 +632,7 @@ export class InstagramArchiveApp extends LitElement {
       });
       this.setState({
         kind: "ready",
-        analysis: new ArchiveAnalysis(archive),
+        archive,
         page: archive.hasMessages ? initialMessagePage : initialFollowPage,
       });
     } catch (error) {

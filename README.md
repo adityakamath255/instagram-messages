@@ -43,11 +43,11 @@ small.
 
 ## Code
 
-The runtime path is `ZIP files -> InstagramArchive -> ArchiveAnalysis -> Lit -> 
-Chart.js`. The four TypeScript modules follow that path:
+The runtime path is `ZIP files -> InstagramArchive -> Lit -> Chart.js`. The four
+TypeScript modules follow that path:
 
-- `src/archive.ts` reads the ZIP files and parses them into the archive model.
-- `src/analysis.ts` derives and caches message reports from that model.
+- `src/archive.ts` reads the ZIP files and exposes archive summaries and reports.
+- `src/analysis.ts` derives and caches message reports inside that boundary.
 - `src/app.ts` owns page state and renders the upload, message, and follow views.
 - `src/charts.ts` translates chart specifications into Chart.js instances.
 

@@ -8,13 +8,10 @@ import {
 } from "@zip.js/zip.js";
 
 import {
-  ArchiveAnalysis,
-  trends,
-} from "../src/analysis.ts";
-import {
   decodeInstagramText,
   ExportError,
   InstagramArchive,
+  trends,
 } from "../src/archive.ts";
 
 async function archive(files) {
@@ -106,14 +103,12 @@ test("loads and analyzes a complete archive", async () => {
   assert.equal(data.conversations.length, 1);
   assert.equal(data.conversations[0].id, "inbox/ana_1");
   assert.equal(data.conversations[0].person, "Ana");
+  assert.equal(data.conversations[0].messageCount, 2);
   assert.equal(data.conversation("inbox/ana_1"), data.conversations[0]);
-  assert.equal(data.conversations[0].messages[0].author, "self");
-  assert.equal(data.conversations[0].messages[0].reactions[0].emoji, "😂");
-  const analysis = new ArchiveAnalysis(data);
   const conversation = data.conversations[0];
-  const overview = analysis.overview("Messages");
-  const messageReport = analysis.conversation(conversation, "Messages");
-  const characterReport = analysis.conversation(conversation, "Characters");
+  const overview = data.overview("Messages");
+  const messageReport = conversation.report("Messages");
+  const characterReport = conversation.report("Characters");
   assert.deepEqual(overview.conversationTotals, [{
     label: "Ana",
     value: 2,
@@ -203,7 +198,7 @@ test("loads message data without follow data", async () => {
   assert.equal(data.hasMessages, true);
   assert.equal(data.conversations.length, 1);
   assert.equal(data.follows, null);
-  assert.equal(new ArchiveAnalysis(data).overview("Messages").byAuthor.self, 1);
+  assert.equal(data.overview("Messages").byAuthor.self, 1);
 });
 
 test("rejects conflicting files across archives", async () => {

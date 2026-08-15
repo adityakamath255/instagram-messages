@@ -3,6 +3,21 @@ import {
   TextWriter,
   ZipReader,
 } from "@zip.js/zip.js";
+import {
+  ArchiveAnalysis,
+  type MessageReport,
+  type Metric,
+  type OverviewReport,
+} from "./analysis.ts";
+
+export {
+  metrics,
+  trends,
+  type MessageReport,
+  type Metric,
+  type OverviewReport,
+  type Trend,
+} from "./analysis.ts";
 
 export type Author = "self" | "other";
 
@@ -25,6 +40,13 @@ export interface Conversation {
   readonly id: string;
   readonly person: string;
   readonly messages: readonly Message[];
+}
+
+export interface ConversationSummary {
+  readonly id: string;
+  readonly person: string;
+  readonly messageCount: number;
+  readonly report: (metric: Metric) => MessageReport;
 }
 
 export interface Follow {
@@ -338,8 +360,9 @@ function followNetwork(files: ReadonlyMap<string, string>): FollowNetwork | null
 export class InstagramArchive {
   readonly sources: readonly string[];
   readonly hasMessages: boolean;
-  readonly conversations: readonly Conversation[];
+  readonly conversations: readonly ConversationSummary[];
   readonly follows: FollowNetwork | null;
+  readonly #analysis: ArchiveAnalysis;
 
   private constructor(
     sources: readonly string[],
@@ -349,8 +372,14 @@ export class InstagramArchive {
   ) {
     this.sources = [...sources];
     this.hasMessages = hasMessages;
-    this.conversations = conversations;
     this.follows = follows;
+    this.#analysis = new ArchiveAnalysis(conversations);
+    this.conversations = conversations.map((conversation) => ({
+      id: conversation.id,
+      person: conversation.person,
+      messageCount: conversation.messages.length,
+      report: (metric) => this.#analysis.conversation(conversation, metric),
+    }));
   }
 
   static async open(
@@ -374,12 +403,16 @@ export class InstagramArchive {
 
   get messageCount(): number {
     return this.conversations.reduce(
-      (total, conversation) => total + conversation.messages.length,
+      (total, conversation) => total + conversation.messageCount,
       0,
     );
   }
 
-  conversation(id: string): Conversation | undefined {
+  conversation(id: string): ConversationSummary | undefined {
     return this.conversations.find((conversation) => conversation.id === id);
+  }
+
+  overview(metric: Metric): OverviewReport {
+    return this.#analysis.overview(metric);
   }
 }
