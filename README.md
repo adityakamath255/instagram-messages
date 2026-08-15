@@ -33,12 +33,13 @@ range, a format, the notification email, and media quality. Four of these
 affect whether this app can read the export.
 
 For information, select all of your information to use every view. The app
-reads Messages, Personal information, and Followers and following. For the
-follow-back report alone, Followers and following is enough. For format, choose
-JSON; the app cannot read the HTML export. For date range, choose all time, so
-activity and follower history are complete. Media quality does not matter,
-since the app reads only the JSON data and never the photos or videos, so the
-lowest setting keeps the download small.
+reads Messages, Personal information, and Followers and following. Message
+reports need Messages and Personal information; the follow-back report needs
+only Followers and following. For format, choose JSON; the app cannot read the
+HTML export. For date range, choose all time, so activity and follower history
+are complete. Media quality does not matter, since the app reads only the JSON
+data and never the photos or videos, so the lowest setting keeps the download
+small.
 
 ## Code
 

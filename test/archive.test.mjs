@@ -102,6 +102,7 @@ test("loads and analyzes a complete archive", async () => {
 
   assert.equal(decodeInstagramText("JosÃ©"), "José");
   assert.deepEqual(data.sources, ["Archive 1"]);
+  assert.equal(data.hasMessages, true);
   assert.equal(data.conversations.length, 1);
   assert.equal(data.conversations[0].id, "inbox/ana_1");
   assert.equal(data.conversations[0].person, "Ana");
@@ -181,11 +182,28 @@ test("loads follow data without message or profile data", async () => {
 
   const data = await InstagramArchive.open([await archive(followFiles)]);
 
+  assert.equal(data.hasMessages, false);
   assert.deepEqual(data.conversations, []);
   assert.deepEqual(
     data.follows.group("you-follow").map(({ username }) => username),
     ["lee"],
   );
+});
+
+test("loads message data without follow data", async () => {
+  const files = completeExport();
+  const messageFiles = Object.fromEntries(
+    Object.entries(files).filter(([path]) =>
+      path === personalPath || path === messagePath
+    ),
+  );
+
+  const data = await InstagramArchive.open([await archive(messageFiles)]);
+
+  assert.equal(data.hasMessages, true);
+  assert.equal(data.conversations.length, 1);
+  assert.equal(data.follows, null);
+  assert.equal(new ArchiveAnalysis(data).overview("Messages").byAuthor.self, 1);
 });
 
 test("rejects conflicting files across archives", async () => {
@@ -204,7 +222,7 @@ test("rejects conflicting files across archives", async () => {
   );
 });
 
-test("rejects an incomplete export", async () => {
+test("rejects incomplete follow data", async () => {
   const incomplete = Object.fromEntries(
     Object.entries(completeExport()).filter(([path]) => path !== followingPath),
   );
@@ -214,5 +232,18 @@ test("rejects an incomplete export", async () => {
     (error) =>
       error instanceof ExportError &&
       error.message.includes("following.json"),
+  );
+});
+
+test("rejects message data without personal information", async () => {
+  const messages = await archive({
+    [messagePath]: completeExport()[messagePath],
+  });
+
+  await assert.rejects(
+    InstagramArchive.open([messages]),
+    (error) =>
+      error instanceof ExportError &&
+      error.message.includes("personal_information.json"),
   );
 });

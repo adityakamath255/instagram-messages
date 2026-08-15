@@ -99,6 +99,7 @@ export class FollowNetwork {
 
 const messageRoot = "your_instagram_activity/messages";
 const followsRoot = "connections/followers_and_following";
+const followingFile = `${followsRoot}/following.json`;
 const personalInfo =
   "personal_information/personal_information/personal_information.json";
 const attachmentPlaceholder = " sent an attachment.";
@@ -147,7 +148,7 @@ function logicalPath(path: string): string | null {
 function supported(path: string): boolean {
   return (
     path === personalInfo ||
-    path === `${followsRoot}/following.json` ||
+    path === followingFile ||
     followerFile.test(path) ||
     messageFile.test(path)
   );
@@ -256,12 +257,7 @@ function parseMessage(raw: any, me: string): Message {
 function conversations(
   files: ReadonlyMap<string, string>,
 ): readonly Conversation[] {
-  if (![...files.keys()].some((path) => messageFile.test(path))) return [];
-
-  const profile = files.get(personalInfo);
-  if (profile === undefined) return [];
-
-  const me = selfName(profile);
+  const me = selfName(requiredFile(files, personalInfo));
   const threads = new Map<
     string,
     { participants: Set<string>; messages: unknown[] }
@@ -326,22 +322,33 @@ function followerList(files: ReadonlyMap<string, string>): readonly Follow[] {
 }
 
 function followingList(files: ReadonlyMap<string, string>): readonly Follow[] {
-  const path = `${followsRoot}/following.json`;
-  const data = parseJson(path, requiredFile(files, path));
+  const data = parseJson(followingFile, requiredFile(files, followingFile));
   return parseFollows(data.relationships_following);
+}
+
+function followNetwork(files: ReadonlyMap<string, string>): FollowNetwork | null {
+  const hasFollows = [...files.keys()].some((path) =>
+    path === followingFile || followerFile.test(path)
+  );
+  return hasFollows
+    ? new FollowNetwork(followerList(files), followingList(files))
+    : null;
 }
 
 export class InstagramArchive {
   readonly sources: readonly string[];
+  readonly hasMessages: boolean;
   readonly conversations: readonly Conversation[];
-  readonly follows: FollowNetwork;
+  readonly follows: FollowNetwork | null;
 
   private constructor(
     sources: readonly string[],
+    hasMessages: boolean,
     conversations: readonly Conversation[],
-    follows: FollowNetwork,
+    follows: FollowNetwork | null,
   ) {
     this.sources = [...sources];
+    this.hasMessages = hasMessages;
     this.conversations = conversations;
     this.follows = follows;
   }
@@ -352,10 +359,16 @@ export class InstagramArchive {
   ): Promise<InstagramArchive> {
     if (!archives.length) fail("Choose at least one Instagram export archive.");
     const files = await readArchives(archives, onProgress);
+    const hasMessages = [...files.keys()].some((path) => messageFile.test(path));
+    const follows = followNetwork(files);
+    if (!hasMessages && !follows) {
+      fail("The export contains neither messages nor follow data.");
+    }
     return new InstagramArchive(
       archives.map((archive, index) => archive.name || `Archive ${index + 1}`),
-      conversations(files),
-      new FollowNetwork(followerList(files), followingList(files)),
+      hasMessages,
+      hasMessages ? conversations(files) : [],
+      follows,
     );
   }
 

@@ -23,6 +23,7 @@ import {
   InstagramArchive,
   type Conversation,
   type FollowGroup,
+  type FollowNetwork,
   type LoadProgress,
 } from "./archive.ts";
 
@@ -189,19 +190,26 @@ export class InstagramArchiveApp extends LitElement {
     status: "waiting" | "reading" | "ready",
     archive?: InstagramArchive,
   ): TemplateResult {
+    const follows = archive?.follows;
+    const unavailable = archive ? "not included" : status;
     const rows = [
-      ["personal_information/", archive ? "profile found" : status],
+      [
+        "personal_information/",
+        archive?.hasMessages ? "profile found" : unavailable,
+      ],
       [
         "messages/inbox/",
-        archive ? `${formatted(archive.messageCount)} messages` : status,
+        archive?.hasMessages
+          ? `${formatted(archive.messageCount)} messages`
+          : unavailable,
       ],
       [
         "followers_and_following/",
-        archive
-          ? `${formatted(archive.follows.followerCount)} in · ${formatted(
-              archive.follows.followingCount,
+        follows
+          ? `${formatted(follows.followerCount)} in · ${formatted(
+              follows.followingCount,
             )} out`
-          : status,
+          : unavailable,
       ],
     ] as const;
     return html`
@@ -245,18 +253,28 @@ export class InstagramArchiveApp extends LitElement {
           ${this.manifest("ready", archive)}
         </section>
         <nav class="view-tabs" aria-label="Archive view">
-          <button
-            aria-current=${page.kind === "follows" ? nothing : "page"}
-            @click=${() => this.show(analysis, initialMessagePage)}
-          >Messages</button>
-          <button
-            aria-current=${page.kind === "follows" ? "page" : nothing}
-            @click=${() => this.show(analysis, initialFollowPage)}
-          >Follows</button>
+          ${archive.hasMessages
+            ? html`
+                <button
+                  aria-current=${page.kind === "follows" ? nothing : "page"}
+                  @click=${() => this.show(analysis, initialMessagePage)}
+                >Messages</button>
+              `
+            : nothing}
+          ${archive.follows
+            ? html`
+                <button
+                  aria-current=${page.kind === "follows" ? "page" : nothing}
+                  @click=${() => this.show(analysis, initialFollowPage)}
+                >Follows</button>
+              `
+            : nothing}
         </nav>
         <main class="report">
           ${page.kind === "follows"
-            ? this.followView(analysis, page)
+            ? archive.follows
+              ? this.followView(analysis, archive.follows, page)
+              : nothing
             : this.messageView(analysis, page)}
         </main>
         <footer>
@@ -495,10 +513,10 @@ export class InstagramArchiveApp extends LitElement {
 
   private followView(
     analysis: ArchiveAnalysis,
+    follows: FollowNetwork,
     page: FollowPage,
   ): TemplateResult {
-    const { archive } = analysis;
-    const group = [...archive.follows.group(page.group)].sort((left, right) =>
+    const group = [...follows.group(page.group)].sort((left, right) =>
       left.username.localeCompare(right.username)
     );
     return html`
@@ -620,7 +638,7 @@ export class InstagramArchiveApp extends LitElement {
       this.setState({
         kind: "ready",
         analysis: new ArchiveAnalysis(archive),
-        page: initialMessagePage,
+        page: archive.hasMessages ? initialMessagePage : initialFollowPage,
       });
     } catch (error) {
       this.setState({
