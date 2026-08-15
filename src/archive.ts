@@ -4,8 +4,12 @@ import {
   ZipReader,
 } from "@zip.js/zip.js";
 import {
-  ArchiveAnalysis,
-  type MessageReport,
+  analyzeConversations,
+  type Author,
+  type Conversation,
+  type ConversationSummary,
+  type Message,
+  type MessageAnalysis,
   type Metric,
   type OverviewReport,
   type ReactionDatum,
@@ -14,6 +18,8 @@ import {
 export {
   metrics,
   trends,
+  type Author,
+  type ConversationSummary,
   type MessageReport,
   type Metric,
   type OverviewReport,
@@ -21,36 +27,8 @@ export {
   type Trend,
 } from "./analysis.ts";
 
-export type Author = "self" | "other";
-
 declare const timestampBrand: unique symbol;
 export type Timestamp = number & { readonly [timestampBrand]: true };
-
-export interface Reaction {
-  readonly emoji: string;
-  readonly actor: Author;
-}
-
-export interface Message {
-  readonly author: Author;
-  readonly timestamp: Timestamp;
-  readonly reactions: readonly Reaction[];
-  readonly text: string | null;
-}
-
-export interface Conversation {
-  readonly id: string;
-  readonly person: string;
-  readonly messages: readonly Message[];
-}
-
-export interface ConversationSummary {
-  readonly id: string;
-  readonly person: string;
-  readonly messageCount: number;
-  readonly report: (metric: Metric) => MessageReport;
-  readonly reactions: () => readonly ReactionDatum[];
-}
 
 export interface Follow {
   readonly username: string;
@@ -249,7 +227,7 @@ function selfName(source: string): string {
     : fail(`${personalInfo} has no profile name.`);
 }
 
-function messageText(raw: any): string | null {
+function messageCharacters(raw: any): number {
   if (
     raw.is_unsent ||
     raw.call_duration != null ||
@@ -257,10 +235,12 @@ function messageText(raw: any): string | null {
     raw.photos?.length ||
     raw.videos?.length
   ) {
-    return null;
+    return 0;
   }
   const decoded = decodeInstagramText(raw.content ?? "");
-  return decoded && !decoded.endsWith(attachmentPlaceholder) ? decoded : null;
+  return decoded && !decoded.endsWith(attachmentPlaceholder)
+    ? [...decoded].length
+    : 0;
 }
 
 function authorOf(name: string, me: string): Author {
@@ -270,22 +250,29 @@ function authorOf(name: string, me: string): Author {
 function parseMessage(raw: any, me: string): Message {
   return {
     author: authorOf(raw.sender_name, me),
-    timestamp: raw.timestamp_ms as Timestamp,
+    timestamp: raw.timestamp_ms,
+    characters: messageCharacters(raw),
     reactions: (raw.reactions ?? []).map((reaction: any) => ({
       emoji: decodeInstagramText(reaction.reaction),
       actor: authorOf(reaction.actor, me),
     })),
-    text: messageText(raw),
   };
 }
 
-function conversations(
+function* parsedMessages(
+  messages: readonly any[],
+  me: string,
+): Iterable<Message> {
+  for (const message of messages) yield parseMessage(message, me);
+}
+
+function* conversations(
   files: ReadonlyMap<string, string>,
-): readonly Conversation[] {
+): Iterable<Conversation> {
   const me = selfName(requiredFile(files, personalInfo));
   const threads = new Map<
     string,
-    { participants: Set<string>; messages: unknown[] }
+    { participants: Set<string>; messages: any[] }
   >();
 
   for (const [path, source] of files) {
@@ -306,18 +293,15 @@ function conversations(
     threads.set(id, thread);
   }
 
-  return [...threads].flatMap(([id, thread]) => {
+  for (const [id, thread] of threads) {
     const others = [...thread.participants].filter((name) => name !== me);
-    if (others.length !== 1) return [];
-    const messages = thread.messages
-      .map((message) => parseMessage(message, me))
-      .sort((left, right) => left.timestamp - right.timestamp);
-    return [{
+    if (others.length !== 1) continue;
+    yield {
       id,
       person: others[0]!,
-      messages,
-    }];
-  });
+      messages: parsedMessages(thread.messages, me),
+    };
+  }
 }
 
 function followName(entry: any, item: any): string {
@@ -365,25 +349,19 @@ export class InstagramArchive {
   readonly hasMessages: boolean;
   readonly conversations: readonly ConversationSummary[];
   readonly follows: FollowNetwork | null;
-  readonly #analysis: ArchiveAnalysis;
+  readonly #analysis: MessageAnalysis;
 
   private constructor(
     sources: readonly string[],
     hasMessages: boolean,
-    conversations: readonly Conversation[],
+    analysis: MessageAnalysis,
     follows: FollowNetwork | null,
   ) {
     this.sources = [...sources];
     this.hasMessages = hasMessages;
     this.follows = follows;
-    this.#analysis = new ArchiveAnalysis(conversations);
-    this.conversations = conversations.map((conversation) => ({
-      id: conversation.id,
-      person: conversation.person,
-      messageCount: conversation.messages.length,
-      report: (metric) => this.#analysis.conversation(conversation, metric),
-      reactions: () => this.#analysis.reactions(conversation),
-    }));
+    this.#analysis = analysis;
+    this.conversations = analysis.conversations;
   }
 
   static async open(
@@ -397,10 +375,13 @@ export class InstagramArchive {
     if (!hasMessages && !follows) {
       fail("The export contains neither messages nor follow data.");
     }
+    const analysis = analyzeConversations(
+      hasMessages ? conversations(files) : [],
+    );
     return new InstagramArchive(
       archives.map((archive, index) => archive.name || `Archive ${index + 1}`),
       hasMessages,
-      hasMessages ? conversations(files) : [],
+      analysis,
       follows,
     );
   }

@@ -395,7 +395,7 @@ export class InstagramArchiveApp extends LitElement {
             @change=${(event: Event) =>
               this.changeMetric(event, archive, page)}
           >
-            ${Object.keys(metrics).map((value) => html`
+            ${metrics.map((value) => html`
               <option value=${value} ?selected=${value === page.metric}>
                 ${value}
               </option>
@@ -599,7 +599,7 @@ export class InstagramArchiveApp extends LitElement {
     archive: InstagramArchive,
     page: OverviewPage | ConversationPage,
   ): void {
-    const metric = selectedKey(event, metrics);
+    const metric = selectedValue(event) as Metric | null;
     if (metric) this.show(archive, { ...page, metric });
   }
 
