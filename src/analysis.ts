@@ -27,7 +27,6 @@ export interface MessageReport {
   readonly byHour: readonly Datum[];
   readonly byWeekday: readonly Datum[];
   readonly daily: readonly Datum[];
-  readonly reactions: readonly ReactionDatum[];
 }
 
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -54,12 +53,7 @@ function add(totals: Map<string, number>, key: string, value: number): void {
   totals.set(key, (totals.get(key) ?? 0) + value);
 }
 
-interface Cache<K, V> {
-  get(key: K): V | undefined;
-  set(key: K, value: V): unknown;
-}
-
-function cached<K, V>(cache: Cache<K, V>, key: K, derive: () => V): V {
+function cached<K, V>(cache: Map<K, V>, key: K, derive: () => V): V {
   const existing = cache.get(key);
   if (existing !== undefined) return existing;
   const value = derive();
@@ -97,10 +91,6 @@ class MessageAnalyzer {
   readonly #hours = Array.from({ length: 24 }, () => 0);
   readonly #daysOfWeek = Array.from({ length: 7 }, () => 0);
   readonly #days = new Map<string, number>();
-  readonly #reactions = new Map<
-    string,
-    { self: number; other: number }
-  >();
 
   constructor(metric: Metric) {
     this.#metric = metric;
@@ -115,26 +105,10 @@ class MessageAnalyzer {
     this.#daysOfWeek[weekday]! += value;
     add(this.#days, dayOf(date), value);
 
-    for (const reaction of message.reactions) {
-      const count = this.#reactions.get(reaction.emoji) ?? {
-        self: 0,
-        other: 0,
-      };
-      count[reaction.actor] += 1;
-      this.#reactions.set(reaction.emoji, count);
-    }
-
     return value;
   }
 
   report(): MessageReport {
-    const reactions = [...this.#reactions]
-      .map(([emoji, counts]) => ({ emoji, ...counts }))
-      .sort((left, right) =>
-        right.self + right.other - left.self - left.other
-      )
-      .slice(0, 25);
-
     return {
       byAuthor: this.#byAuthor,
       byHour: this.#hours.map((value, hour) => ({
@@ -146,8 +120,32 @@ class MessageAnalyzer {
         value,
       })),
       daily: series(this.#days),
-      reactions,
     };
+  }
+}
+
+function analyzeReactions(messages: Iterable<Message>): readonly ReactionDatum[] {
+  const totals = new Map<string, { self: number; other: number }>();
+  for (const message of messages) {
+    for (const reaction of message.reactions) {
+      const counts = totals.get(reaction.emoji) ?? { self: 0, other: 0 };
+      counts[reaction.actor] += 1;
+      totals.set(reaction.emoji, counts);
+    }
+  }
+  return [...totals]
+    .map(([emoji, counts]) => ({ emoji, ...counts }))
+    .sort((left, right) =>
+      right.self + right.other - left.self - left.other
+    )
+    .slice(0, 25);
+}
+
+function* messagesIn(
+  conversations: Iterable<Conversation>,
+): Iterable<Message> {
+  for (const conversation of conversations) {
+    yield* conversation.messages;
   }
 }
 
@@ -189,10 +187,15 @@ function analyzeMessages(
 export class ArchiveAnalysis {
   readonly #conversations: readonly Conversation[];
   readonly #overviews = new Map<Metric, OverviewReport>();
-  readonly #conversationReports = new WeakMap<
+  readonly #conversationReports = new Map<
     Conversation,
     Map<Metric, MessageReport>
   >();
+  readonly #conversationReactions = new Map<
+    Conversation,
+    readonly ReactionDatum[]
+  >();
+  #overviewReactions: readonly ReactionDatum[] | null = null;
 
   constructor(conversations: readonly Conversation[]) {
     this.#conversations = conversations;
@@ -214,5 +217,14 @@ export class ArchiveAnalysis {
   overview(metric: Metric): OverviewReport {
     return cached(this.#overviews, metric, () =>
       analyzeOverview(this.#conversations, metric));
+  }
+
+  reactions(conversation?: Conversation): readonly ReactionDatum[] {
+    if (conversation) {
+      return cached(this.#conversationReactions, conversation, () =>
+        analyzeReactions(conversation.messages));
+    }
+    return this.#overviewReactions ??=
+      analyzeReactions(messagesIn(this.#conversations));
   }
 }

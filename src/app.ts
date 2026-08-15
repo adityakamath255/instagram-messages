@@ -21,6 +21,7 @@ import {
   type LoadProgress,
   type MessageReport,
   type Metric,
+  type ReactionDatum,
   type Trend,
 } from "./archive.ts";
 
@@ -290,6 +291,9 @@ export class InstagramArchiveApp extends LitElement {
     const report = conversation
       ? conversation.report(page.metric)
       : archive.overview(page.metric);
+    const reactions = conversation
+      ? conversation.reactions()
+      : archive.reactions();
     const total = report.byAuthor.self + report.byAuthor.other;
     return html`
       <section class="report-head">
@@ -345,10 +349,10 @@ export class InstagramArchiveApp extends LitElement {
               () => this.trendChart(report, page),
             )
           : nothing}
-        ${report.reactions.length
+        ${reactions.length
           ? guard(
               [archive, conversation],
-              () => this.reactionChart(report.reactions),
+              () => this.reactionChart(reactions),
             )
           : this.emptyCard("Top reactions", "No reactions in this selection.")}
       </div>
@@ -454,7 +458,7 @@ export class InstagramArchiveApp extends LitElement {
   }
 
   private reactionChart(
-    reactions: MessageReport["reactions"],
+    reactions: readonly ReactionDatum[],
   ): TemplateResult {
     const spec: ChartSpec = {
       title: "Top reactions",

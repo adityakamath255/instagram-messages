@@ -8,6 +8,7 @@ import {
   type MessageReport,
   type Metric,
   type OverviewReport,
+  type ReactionDatum,
 } from "./analysis.ts";
 
 export {
@@ -16,6 +17,7 @@ export {
   type MessageReport,
   type Metric,
   type OverviewReport,
+  type ReactionDatum,
   type Trend,
 } from "./analysis.ts";
 
@@ -47,6 +49,7 @@ export interface ConversationSummary {
   readonly person: string;
   readonly messageCount: number;
   readonly report: (metric: Metric) => MessageReport;
+  readonly reactions: () => readonly ReactionDatum[];
 }
 
 export interface Follow {
@@ -379,6 +382,7 @@ export class InstagramArchive {
       person: conversation.person,
       messageCount: conversation.messages.length,
       report: (metric) => this.#analysis.conversation(conversation, metric),
+      reactions: () => this.#analysis.reactions(conversation),
     }));
   }
 
@@ -414,5 +418,9 @@ export class InstagramArchive {
 
   overview(metric: Metric): OverviewReport {
     return this.#analysis.overview(metric);
+  }
+
+  reactions(): readonly ReactionDatum[] {
+    return this.#analysis.reactions();
   }
 }

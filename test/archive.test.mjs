@@ -131,11 +131,13 @@ test("loads and analyzes a complete archive", async () => {
     trends.Cumulative(characterReport).map(({ value }) => value),
     [6],
   );
-  assert.deepEqual(messageReport.reactions, [{
+  const reactions = [{
     emoji: "😂",
     self: 0,
     other: 1,
-  }]);
+  }];
+  assert.deepEqual(data.reactions(), reactions);
+  assert.deepEqual(conversation.reactions(), reactions);
 
   assert.deepEqual(
     data.follows.group("mutual").map(({ username }) => username),
