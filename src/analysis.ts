@@ -1,6 +1,3 @@
-export const metrics = ["Messages", "Characters"] as const;
-
-export type Metric = typeof metrics[number];
 export type Author = "self" | "other";
 
 export interface Reaction {
@@ -11,7 +8,6 @@ export interface Reaction {
 export interface Message {
   readonly author: Author;
   readonly timestamp: number;
-  readonly characters: number;
   readonly reactions: readonly Reaction[];
 }
 
@@ -39,22 +35,19 @@ export interface MessageReport {
   readonly daily: readonly Datum[];
 }
 
-export interface OverviewReport extends MessageReport {
-  readonly conversationTotals: readonly Datum[];
-}
-
 export interface ConversationSummary {
   readonly id: string;
   readonly person: string;
-  readonly messageCount: number;
-  readonly report: (metric: Metric) => MessageReport;
-  readonly reactions: () => readonly ReactionDatum[];
+  readonly messageCount: () => number;
+  readonly report: MessageReport;
+  readonly reactions: readonly ReactionDatum[];
 }
 
 export interface MessageAnalysis {
   readonly conversations: readonly ConversationSummary[];
-  readonly overview: (metric: Metric) => OverviewReport;
-  readonly reactions: () => readonly ReactionDatum[];
+  readonly overview: MessageReport;
+  readonly conversationTotals: readonly Datum[];
+  readonly reactions: readonly ReactionDatum[];
 }
 
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -96,50 +89,34 @@ export const trends = {
 
 export type Trend = keyof typeof trends;
 
-type Counts = Record<Metric, number>;
-
 interface Aggregate {
-  readonly byAuthor: Record<Author, Counts>;
-  readonly byHour: Counts[];
-  readonly byWeekday: Counts[];
-  readonly daily: Map<string, Counts>;
+  readonly byAuthor: Record<Author, number>;
+  readonly byHour: number[];
+  readonly byWeekday: number[];
+  readonly daily: Map<string, number>;
   readonly reactions: Map<string, Record<Author, number>>;
-}
-
-function emptyCounts(): Counts {
-  return { Messages: 0, Characters: 0 };
 }
 
 function emptyAggregate(): Aggregate {
   return {
-    byAuthor: { self: emptyCounts(), other: emptyCounts() },
-    byHour: Array.from({ length: 24 }, emptyCounts),
-    byWeekday: Array.from({ length: 7 }, emptyCounts),
+    byAuthor: { self: 0, other: 0 },
+    byHour: Array(24).fill(0),
+    byWeekday: Array(7).fill(0),
     daily: new Map(),
     reactions: new Map(),
   };
 }
 
-function addCounts(target: Counts, messages: number, characters: number): void {
-  target.Messages += messages;
-  target.Characters += characters;
-}
-
-function mergeCounts(target: Counts, source: Counts): void {
-  addCounts(target, source.Messages, source.Characters);
-}
-
 function addMessage(aggregate: Aggregate, message: Message): void {
   const date = new Date(message.timestamp);
+  const hour = date.getHours();
   const weekday = (date.getDay() + 6) % 7;
-  addCounts(aggregate.byAuthor[message.author], 1, message.characters);
-  addCounts(aggregate.byHour[date.getHours()]!, 1, message.characters);
-  addCounts(aggregate.byWeekday[weekday]!, 1, message.characters);
+  aggregate.byAuthor[message.author] += 1;
+  aggregate.byHour[hour] = aggregate.byHour[hour]! + 1;
+  aggregate.byWeekday[weekday] = aggregate.byWeekday[weekday]! + 1;
 
   const day = dayOf(date);
-  const daily = aggregate.daily.get(day) ?? emptyCounts();
-  addCounts(daily, 1, message.characters);
-  aggregate.daily.set(day, daily);
+  aggregate.daily.set(day, (aggregate.daily.get(day) ?? 0) + 1);
 
   for (const reaction of message.reactions) {
     const counts = aggregate.reactions.get(reaction.emoji) ?? {
@@ -151,65 +128,24 @@ function addMessage(aggregate: Aggregate, message: Message): void {
   }
 }
 
-function mergeAggregate(target: Aggregate, source: Aggregate): void {
-  mergeCounts(target.byAuthor.self, source.byAuthor.self);
-  mergeCounts(target.byAuthor.other, source.byAuthor.other);
-  for (let hour = 0; hour < 24; hour += 1) {
-    mergeCounts(target.byHour[hour]!, source.byHour[hour]!);
-  }
-  for (let weekday = 0; weekday < 7; weekday += 1) {
-    mergeCounts(target.byWeekday[weekday]!, source.byWeekday[weekday]!);
-  }
-  for (const [day, sourceCounts] of source.daily) {
-    const counts = target.daily.get(day) ?? emptyCounts();
-    mergeCounts(counts, sourceCounts);
-    target.daily.set(day, counts);
-  }
-  for (const [emoji, sourceCounts] of source.reactions) {
-    const counts = target.reactions.get(emoji) ?? { self: 0, other: 0 };
-    counts.self += sourceCounts.self;
-    counts.other += sourceCounts.other;
-    target.reactions.set(emoji, counts);
-  }
-}
-
 function series(values: ReadonlyMap<string, number>): readonly Datum[] {
   return [...values]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([label, value]) => ({ label, value }));
 }
 
-function countSeries(
-  values: ReadonlyMap<string, Counts>,
-  metric: Metric,
-): readonly Datum[] {
-  return [...values]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([label, counts]) => ({ label, value: counts[metric] }));
-}
-
-function report(aggregate: Aggregate, metric: Metric): MessageReport {
+function report(aggregate: Aggregate): MessageReport {
   return {
-    byAuthor: {
-      self: aggregate.byAuthor.self[metric],
-      other: aggregate.byAuthor.other[metric],
-    },
-    byHour: aggregate.byHour.map((counts, hour) => ({
+    byAuthor: { ...aggregate.byAuthor },
+    byHour: aggregate.byHour.map((value, hour) => ({
       label: padded(hour),
-      value: counts[metric],
+      value,
     })),
-    byWeekday: aggregate.byWeekday.map((counts, weekday) => ({
+    byWeekday: aggregate.byWeekday.map((value, weekday) => ({
       label: weekdays[weekday]!,
-      value: counts[metric],
+      value,
     })),
-    daily: countSeries(aggregate.daily, metric),
-  };
-}
-
-function reports(aggregate: Aggregate): Record<Metric, MessageReport> {
-  return {
-    Messages: report(aggregate, "Messages"),
-    Characters: report(aggregate, "Characters"),
+    daily: series(aggregate.daily),
   };
 }
 
@@ -223,28 +159,16 @@ function reactions(aggregate: Aggregate): readonly ReactionDatum[] {
     .slice(0, 25);
 }
 
-function total(aggregate: Aggregate, metric: Metric): number {
-  return aggregate.byAuthor.self[metric] + aggregate.byAuthor.other[metric];
-}
-
-function overviewReport(
-  aggregate: Aggregate,
-  metric: Metric,
+function conversationTotals(
   conversations: readonly ConversationSummary[],
-): OverviewReport {
-  return {
-    ...report(aggregate, metric),
-    conversationTotals: conversations
-      .map((conversation) => {
-        const report = conversation.report(metric);
-        return {
-          label: conversation.person,
-          value: report.byAuthor.self + report.byAuthor.other,
-        };
-      })
-      .sort((left, right) => right.value - left.value)
-      .slice(0, 25),
-  };
+): readonly Datum[] {
+  return conversations
+    .map((conversation) => ({
+      label: conversation.person,
+      value: conversation.messageCount(),
+    }))
+    .sort((left, right) => right.value - left.value)
+    .slice(0, 25);
 }
 
 export function analyzeConversations(
@@ -255,27 +179,25 @@ export function analyzeConversations(
 
   for (const input of inputs) {
     const aggregate = emptyAggregate();
-    for (const message of input.messages) addMessage(aggregate, message);
-    mergeAggregate(overview, aggregate);
-    const conversationReports = reports(aggregate);
-    const conversationReactions = reactions(aggregate);
+    for (const message of input.messages) {
+      addMessage(aggregate, message);
+      addMessage(overview, message);
+    }
+    const conversationReport = report(aggregate);
     conversations.push({
       id: input.id,
       person: input.person,
-      messageCount: total(aggregate, "Messages"),
-      report: (metric) => conversationReports[metric],
-      reactions: () => conversationReactions,
+      messageCount: () =>
+        conversationReport.byAuthor.self + conversationReport.byAuthor.other,
+      report: conversationReport,
+      reactions: reactions(aggregate),
     });
   }
 
-  const overviewReports: Record<Metric, OverviewReport> = {
-    Messages: overviewReport(overview, "Messages", conversations),
-    Characters: overviewReport(overview, "Characters", conversations),
-  };
-  const overviewReactions = reactions(overview);
   return {
     conversations,
-    overview: (metric) => overviewReports[metric],
-    reactions: () => overviewReactions,
+    overview: report(overview),
+    conversationTotals: conversationTotals(conversations),
+    reactions: reactions(overview),
   };
 }

@@ -103,13 +103,12 @@ test("loads and analyzes a complete archive", async () => {
   assert.equal(data.conversations.length, 1);
   assert.equal(data.conversations[0].id, "inbox/ana_1");
   assert.equal(data.conversations[0].person, "Ana");
-  assert.equal(data.conversations[0].messageCount, 2);
+  assert.equal(data.conversations[0].messageCount(), 2);
   assert.equal(data.conversation("inbox/ana_1"), data.conversations[0]);
   const conversation = data.conversations[0];
-  const overview = data.overview("Messages");
-  const messageReport = conversation.report("Messages");
-  const characterReport = conversation.report("Characters");
-  assert.deepEqual(overview.conversationTotals, [{
+  const overview = data.overview;
+  const messageReport = conversation.report;
+  assert.deepEqual(data.conversationTotals, [{
     label: "Ana",
     value: 2,
   }]);
@@ -119,25 +118,21 @@ test("loads and analyzes a complete archive", async () => {
     2,
   );
   assert.deepEqual(messageReport.byAuthor, { self: 1, other: 1 });
-  assert.equal(
-    characterReport.byAuthor.self + characterReport.byAuthor.other,
-    6,
+  assert.deepEqual(
+    trends.Monthly(messageReport).map(({ value }) => value),
+    [2],
   );
   assert.deepEqual(
-    trends.Monthly(characterReport).map(({ value }) => value),
-    [6],
-  );
-  assert.deepEqual(
-    trends.Cumulative(characterReport).map(({ value }) => value),
-    [6],
+    trends.Cumulative(messageReport).map(({ value }) => value),
+    [2],
   );
   const reactions = [{
     emoji: "😂",
     self: 0,
     other: 1,
   }];
-  assert.deepEqual(data.reactions(), reactions);
-  assert.deepEqual(conversation.reactions(), reactions);
+  assert.deepEqual(data.reactions, reactions);
+  assert.deepEqual(conversation.reactions, reactions);
 
   assert.deepEqual(
     data.follows.group("mutual").map(({ username }) => username),
@@ -200,7 +195,7 @@ test("loads message data without follow data", async () => {
   assert.equal(data.hasMessages, true);
   assert.equal(data.conversations.length, 1);
   assert.equal(data.follows, null);
-  assert.equal(data.overview("Messages").byAuthor.self, 1);
+  assert.equal(data.overview.byAuthor.self, 1);
 });
 
 test("rejects conflicting files across archives", async () => {

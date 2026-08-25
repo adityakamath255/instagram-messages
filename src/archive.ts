@@ -8,21 +8,18 @@ import {
   type Author,
   type Conversation,
   type ConversationSummary,
+  type Datum,
   type Message,
   type MessageAnalysis,
-  type Metric,
-  type OverviewReport,
+  type MessageReport,
   type ReactionDatum,
 } from "./analysis.ts";
 
 export {
-  metrics,
   trends,
   type Author,
   type ConversationSummary,
   type MessageReport,
-  type Metric,
-  type OverviewReport,
   type ReactionDatum,
   type Trend,
 } from "./analysis.ts";
@@ -105,7 +102,6 @@ const followsRoot = "connections/followers_and_following";
 const followingFile = `${followsRoot}/following.json`;
 const personalInfo =
   "personal_information/personal_information/personal_information.json";
-const attachmentPlaceholder = " sent an attachment.";
 const markers = [
   "your_instagram_activity/",
   "connections/",
@@ -227,22 +223,6 @@ function selfName(source: string): string {
     : fail(`${personalInfo} has no profile name.`);
 }
 
-function messageCharacters(raw: any): number {
-  if (
-    raw.is_unsent ||
-    raw.call_duration != null ||
-    raw.audio_files?.length ||
-    raw.photos?.length ||
-    raw.videos?.length
-  ) {
-    return 0;
-  }
-  const decoded = decodeInstagramText(raw.content ?? "");
-  return decoded && !decoded.endsWith(attachmentPlaceholder)
-    ? [...decoded].length
-    : 0;
-}
-
 function authorOf(name: string, me: string): Author {
   return decodeInstagramText(name) === me ? "self" : "other";
 }
@@ -251,7 +231,6 @@ function parseMessage(raw: any, me: string): Message {
   return {
     author: authorOf(raw.sender_name, me),
     timestamp: raw.timestamp_ms,
-    characters: messageCharacters(raw),
     reactions: (raw.reactions ?? []).map((reaction: any) => ({
       emoji: decodeInstagramText(reaction.reaction),
       actor: authorOf(reaction.actor, me),
@@ -347,6 +326,7 @@ function followNetwork(files: ReadonlyMap<string, string>): FollowNetwork | null
 export class InstagramArchive {
   readonly sources: readonly string[];
   readonly hasMessages: boolean;
+  readonly messageCount: number;
   readonly conversations: readonly ConversationSummary[];
   readonly follows: FollowNetwork | null;
   readonly #analysis: MessageAnalysis;
@@ -362,6 +342,10 @@ export class InstagramArchive {
     this.follows = follows;
     this.#analysis = analysis;
     this.conversations = analysis.conversations;
+    this.messageCount = this.conversations.reduce(
+      (total, conversation) => total + conversation.messageCount(),
+      0,
+    );
   }
 
   static async open(
@@ -386,22 +370,19 @@ export class InstagramArchive {
     );
   }
 
-  get messageCount(): number {
-    return this.conversations.reduce(
-      (total, conversation) => total + conversation.messageCount,
-      0,
-    );
-  }
-
   conversation(id: string): ConversationSummary | undefined {
     return this.conversations.find((conversation) => conversation.id === id);
   }
 
-  overview(metric: Metric): OverviewReport {
-    return this.#analysis.overview(metric);
+  get overview(): MessageReport {
+    return this.#analysis.overview;
   }
 
-  reactions(): readonly ReactionDatum[] {
-    return this.#analysis.reactions();
+  get conversationTotals(): readonly Datum[] {
+    return this.#analysis.conversationTotals;
+  }
+
+  get reactions(): readonly ReactionDatum[] {
+    return this.#analysis.reactions;
   }
 }
