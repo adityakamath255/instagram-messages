@@ -1,71 +1,67 @@
 # Instagram archive
 
-A browser app for exploring your own Instagram data export: message activity
-by person, hour, and weekday; reactions; follower reciprocity; and follow
-dates.
+A browser app for exploring an Instagram data export. It reports one-to-one message activity by person, hour, weekday, and date; separates the two sides of a conversation; counts reactions; and groups follower relationships.
 
-Everything runs in your browser. The app reads only supported JSON entries
-directly from the ZIP and ignores its media. Nothing is uploaded.
+The application is static. It opens the ZIP files in the browser, reads the supported JSON entries, and ignores photos, videos, and other media. There is no upload endpoint. Reloading the page clears the archive.
 
-## Get your data
+## Preparing the export
 
-Instagram is moving accounts to Meta Accounts, so you may see either "Accounts
-Center" or "Meta Account settings" when managing your account. The export lives
-in the same place either way.
+Use Instagram's Export your information tool in Accounts Center and choose an export to your device. Keep the downloaded files as ZIPs. These settings produce the most useful report:
 
-To export to your device:
+- Format: JSON. HTML exports are not supported.
+- Date range: all time. A shorter range produces a correspondingly incomplete report.
+- Information: Messages, Personal information, and Followers and following.
+- Media quality: any setting. The application does not read media files.
 
-1. Open Instagram, click More (the hamburger menu) in the bottom left, then
-   Settings.
-2. Click Accounts Center, then Your information and permissions.
-3. Click Export your information, then Create export.
-4. Select the profile to export, then click Next.
-5. Select Export to device.
-6. Customize the export (see below), then click Start export.
+A partial export also works. Message reports require Messages and Personal information; follow reports require both the followers and following files. If Instagram divides an export into several ZIPs, select all of them in the same file picker.
 
-Instagram emails you when the export is ready. It arrives as one or more `.zip`
-files. Keep them zipped.
+## Reports
 
-### Export settings
+The message overview shows the 25 largest one-to-one conversations, activity by local hour and weekday, and the 25 most-used reactions. Selecting a conversation adds the message split between you and the other person, daily or monthly volume, a cumulative message count, and reactions grouped by who used them.
 
-The customization step lets you choose which information to include, a date
-range, a format, the notification email, and media quality. Four of these
-affect whether this app can read the export.
+The follow report divides accounts into mutual follows, accounts you follow without a follow-back, and accounts that follow you without being followed back. It also shows the timestamp recorded for each relationship.
 
-For information, select all of your information to use every view. The app
-reads Messages, Personal information, and Followers and following. Message
-reports need Messages and Personal information; the follow-back report needs
-only Followers and following. For format, choose JSON; the app cannot read the
-HTML export. For date range, choose all time, so activity and follower history
-are complete. Media quality does not matter, since the app reads only the JSON
-data and never the photos or videos, so the lowest setting keeps the download
-small.
+## Implementation
 
-## Code
+The data path is:
 
-The runtime path is `ZIP files -> InstagramArchive -> Lit -> Chart.js`. The four
-TypeScript modules follow that path:
+```text
+ZIP files
+-> supported JSON entries
+-> normalized messages and follows
+-> aggregate reports
+-> Lit views
+-> Chart.js
+```
 
-- `src/archive.ts` reads the ZIP files and exposes archive summaries and reports.
-- `src/analysis.ts` derives message reports while the archive is opened.
-- `src/app.ts` owns page state and renders the upload, message, and follow views.
-- `src/charts.ts` translates chart specifications into Chart.js instances.
+[`InstagramArchive.open`](src/archive.ts) accepts one or more ZIP `Blob`s. zip.js enumerates each archive, path normalization removes the export's outer directory, and only the message, personal-information, follower, and following files are extracted. Files from split archives are merged by logical path. Identical duplicates are accepted, while conflicting copies are rejected.
 
-## Develop
+Message parsing reduces each raw record to its author, timestamp, and reactions. [`analyzeConversations`](src/analysis.ts) builds the overall and per-conversation reports in one pass. The returned model contains source filenames, aggregates, conversation names, reactions, and follow records. A decoder also repairs the UTF-8 text that some Instagram exports store as mojibake.
 
-Install [Node.js](https://nodejs.org/) 26 or newer, then run:
+The interface in [`src/app.ts`](src/app.ts) has four states: empty, loading, error, and ready. A ready page is an overview, one conversation, or the follow report, and the render switch selects the matching view. The `ArchiveChart` component in [`src/charts.ts`](src/charts.ts) converts a small chart specification into Chart.js configuration and destroys the old chart when its specification changes or the component disconnects.
+
+## Development
+
+Requires Node.js 26 or newer.
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
-Choose your export `.zip` in the browser. If Instagram split the export into
-several ZIP files, choose all of them together.
-
-Run the tests and production build with:
+Run the archive tests and production build with:
 
 ```sh
 npm test
 npm run build
 ```
+
+The tests create ZIP archives in memory and cover complete, split, partial, conflicting, and incomplete exports. The GitHub Pages workflow runs the tests and build before deploying `dist` on pushes to `main`.
+
+## Limitations
+
+- Only one-to-one message threads are analyzed. Threads with zero or more than one other participant are ignored.
+- Message bodies and media are not retained, so the reports cannot analyze words, links, attachments, or calls.
+- Message hours and weekdays use the browser's local timezone.
+- The people and reaction charts show at most 25 entries.
+- The parser targets Instagram's current JSON paths and fields. A future export schema change may require parser changes.
