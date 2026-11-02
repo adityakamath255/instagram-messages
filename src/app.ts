@@ -290,7 +290,7 @@ export class InstagramArchiveApp extends LitElement {
       ? conversation.reactions
       : archive.reactions;
     const total = conversation
-      ? conversation.messageCount()
+      ? conversation.messageCount
       : archive.messageCount;
     return html`
       <section class="report-head">
@@ -378,9 +378,7 @@ export class InstagramArchiveApp extends LitElement {
                 value=${conversation.id}
                 ?selected=${conversation.id === conversationId}
               >
-                ${conversation.person} · ${formatted(
-                  conversation.messageCount(),
-                )}
+                ${conversation.person} · ${formatted(conversation.messageCount)}
               </option>
             `)}
           </select>

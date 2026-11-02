@@ -24,12 +24,9 @@ export {
   type Trend,
 } from "./analysis.ts";
 
-declare const timestampBrand: unique symbol;
-export type Timestamp = number & { readonly [timestampBrand]: true };
-
 export interface Follow {
   readonly username: string;
-  readonly followedAt: Timestamp;
+  readonly followedAt: number;
 }
 
 export interface ArchiveSource extends Blob {
@@ -295,7 +292,7 @@ function parseFollows(entries: readonly any[]): readonly Follow[] {
   return entries.flatMap((entry) =>
     entry.string_list_data.map((item: any) => ({
       username: followName(entry, item),
-      followedAt: item.timestamp * 1000 as Timestamp,
+      followedAt: item.timestamp * 1000,
     }))
   );
 }
@@ -343,7 +340,7 @@ export class InstagramArchive {
     this.#analysis = analysis;
     this.conversations = analysis.conversations;
     this.messageCount = this.conversations.reduce(
-      (total, conversation) => total + conversation.messageCount(),
+      (total, conversation) => total + conversation.messageCount,
       0,
     );
   }

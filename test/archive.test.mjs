@@ -103,7 +103,7 @@ test("loads and analyzes a complete archive", async () => {
   assert.equal(data.conversations.length, 1);
   assert.equal(data.conversations[0].id, "inbox/ana_1");
   assert.equal(data.conversations[0].person, "Ana");
-  assert.equal(data.conversations[0].messageCount(), 2);
+  assert.equal(data.conversations[0].messageCount, 2);
   assert.equal(data.conversation("inbox/ana_1"), data.conversations[0]);
   const conversation = data.conversations[0];
   const overview = data.overview;

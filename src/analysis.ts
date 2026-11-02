@@ -38,7 +38,7 @@ export interface MessageReport {
 export interface ConversationSummary {
   readonly id: string;
   readonly person: string;
-  readonly messageCount: () => number;
+  readonly messageCount: number;
   readonly report: MessageReport;
   readonly reactions: readonly ReactionDatum[];
 }
@@ -165,7 +165,7 @@ function conversationTotals(
   return conversations
     .map((conversation) => ({
       label: conversation.person,
-      value: conversation.messageCount(),
+      value: conversation.messageCount,
     }))
     .sort((left, right) => right.value - left.value)
     .slice(0, 25);
@@ -183,13 +183,11 @@ export function analyzeConversations(
       addMessage(aggregate, message);
       addMessage(overview, message);
     }
-    const conversationReport = report(aggregate);
     conversations.push({
       id: input.id,
       person: input.person,
-      messageCount: () =>
-        conversationReport.byAuthor.self + conversationReport.byAuthor.other,
-      report: conversationReport,
+      messageCount: aggregate.byAuthor.self + aggregate.byAuthor.other,
+      report: report(aggregate),
       reactions: reactions(aggregate),
     });
   }
