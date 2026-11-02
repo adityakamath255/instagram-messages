@@ -13,6 +13,7 @@ import {
   InstagramArchive,
   trends,
 } from "../src/archive.ts";
+import { configuration } from "../src/charts.ts";
 
 async function archive(files) {
   const writer = new ZipWriter(new BlobWriter("application/zip"));
@@ -238,4 +239,28 @@ test("rejects message data without personal information", async () => {
       error instanceof ExportError &&
       error.message.includes("personal_information.json"),
   );
+});
+
+test("charts keep separate entries with the same label", (t) => {
+  globalThis.window = { matchMedia: () => ({ matches: false }) };
+  globalThis.document = { documentElement: {} };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: () => "" });
+  t.after(() => {
+    delete globalThis.window;
+    delete globalThis.document;
+    delete globalThis.getComputedStyle;
+  });
+
+  const { data } = configuration({
+    title: "Messages by person",
+    kind: "bar",
+    datasets: [{
+      label: "Messages",
+      data: [{ label: "Ana", value: 3 }, { label: "Ana", value: 2 }],
+      tone: "primary",
+    }],
+  });
+
+  assert.deepEqual(data.labels, ["Ana", "Ana"]);
+  assert.deepEqual(data.datasets[0].data, [3, 2]);
 });

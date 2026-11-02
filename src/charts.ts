@@ -26,6 +26,8 @@ export interface ChartDataset {
 export interface ChartSpec {
   readonly title: string;
   readonly kind: "bar" | "line";
+  // entries align by position across datasets; labels come from the first
+  // dataset and need not be unique.
   readonly datasets: readonly [ChartDataset, ...ChartDataset[]];
   readonly horizontal?: boolean;
 }
@@ -54,11 +56,9 @@ function theme(): Theme {
   };
 }
 
-function configuration(spec: ChartSpec): ChartConfiguration {
+export function configuration(spec: ChartSpec): ChartConfiguration {
   const colors = theme();
-  const labels = [...new Set(spec.datasets.flatMap((dataset) =>
-    dataset.data.map(({ label }) => label)
-  ))];
+  const labels = spec.datasets[0].data.map(({ label }) => label);
   const reducedMotion = window.matchMedia(
     "(prefers-reduced-motion: reduce)",
   ).matches;
@@ -66,22 +66,17 @@ function configuration(spec: ChartSpec): ChartConfiguration {
     type: spec.kind,
     data: {
       labels,
-      datasets: spec.datasets.map((dataset) => {
-        const values = new Map(dataset.data.map(({ label, value }) =>
-          [label, value]
-        ));
-        return {
-          label: dataset.label,
-          data: labels.map((label) => values.get(label) ?? 0),
-          backgroundColor: colors[dataset.tone],
-          borderColor: colors[dataset.tone],
-          borderWidth: spec.kind === "line" ? 2 : 0,
-          borderRadius: spec.kind === "bar" ? 3 : 0,
-          pointRadius: spec.kind === "line" ? 0 : undefined,
-          pointHitRadius: spec.kind === "line" ? 8 : undefined,
-          tension: spec.kind === "line" ? 0.18 : undefined,
-        };
-      }),
+      datasets: spec.datasets.map((dataset) => ({
+        label: dataset.label,
+        data: dataset.data.map(({ value }) => value),
+        backgroundColor: colors[dataset.tone],
+        borderColor: colors[dataset.tone],
+        borderWidth: spec.kind === "line" ? 2 : 0,
+        borderRadius: spec.kind === "bar" ? 3 : 0,
+        pointRadius: spec.kind === "line" ? 0 : undefined,
+        pointHitRadius: spec.kind === "line" ? 8 : undefined,
+        tension: spec.kind === "line" ? 0.18 : undefined,
+      })),
     },
     options: {
       animation: reducedMotion ? false : { duration: 280 },
